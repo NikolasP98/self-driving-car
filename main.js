@@ -16,12 +16,14 @@ export default class Main {
 	#netCtx;
 	#width;
 	#height;
+	#netWidth;
 
-	constructor({ ctx, width, height, animation, netCtx }) {
+	constructor({ ctx, width, height, animation, netCtx, netWidth }) {
 		this.#ctx = ctx;
 		this.#netCtx = netCtx;
 		this.#width = width;
 		this.#height = height;
+		this.#netWidth = netWidth;
 
 		this.animation = animation;
 	}
@@ -44,6 +46,7 @@ export default class Main {
 
 	// setup function runs once before animation begins
 	init = () => {
+		traffic.length = 0;
 		saveButton.onclick = () => this.save();
 		deleteButton.onclick = () => this.discard();
 
@@ -92,12 +95,12 @@ export default class Main {
 
 	// animation loop runs indefinitely
 	#animate = (time) => {
-		this.#ctx.clearRect(0, 0, canvas.width, canvas.height);
-		this.#netCtx.clearRect(0, 0, 500, canvas.height);
+		this.#ctx.clearRect(0, 0, this.#width, this.#height);
+		this.#netCtx.clearRect(0, 0, this.#netWidth, this.#height);
 
 		// ----- MAIN ANIMATION CODE START -----
 
-		this.#ctx.fillStyle = 'lightgray';
+		this.#ctx.fillStyle = '#e8e5db';
 		this.#ctx.fillRect(0, 0, this.#width, this.#height);
 		this.#ctx.strokeStyle = 'transparent';
 
@@ -115,7 +118,6 @@ export default class Main {
 
 		for (let i = 0; i < cars.length; i++) {
 			cars[i].animate(this.#ctx, street.borders, traffic);
-			console.log(cars[i].speed);
 		}
 		this.#ctx.globalAlpha = 1;
 
@@ -130,4 +132,8 @@ export default class Main {
 
 		this.animation = window.requestAnimationFrame(this.#animate.bind(this));
 	};
+
+	stop() {
+		cancelAnimationFrame(this.animation);
+	}
 }
