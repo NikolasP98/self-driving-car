@@ -75,6 +75,11 @@ window.onload = () => {
 		netWidth: initialSize.netWidth,
 	});
 	mainEvent.init();
+	const checkpoint = () => mainEvent?.checkpoint();
+	window.addEventListener('pagehide', checkpoint);
+	document.addEventListener('visibilitychange', () => {
+		if (document.visibilityState === 'hidden') checkpoint();
+	});
 
 	let resizeTimer;
 	window.addEventListener('resize', () => {

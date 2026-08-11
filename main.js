@@ -19,7 +19,8 @@ const MIN_GENERATION_TICKS = 240;
 const MAX_SAMPLES = 120;
 const MAX_PAST_RUNS = 4;
 const LAB_STATE_KEY = 'pinoniteNeuralLabV2';
-const LAB_STATE_VERSION = 2;
+const LAB_STATE_VERSION = 3;
+const CHECKPOINT_INTERVAL_MS = 1500;
 const REWARD_DEFAULTS = Object.freeze({
 	progress: 1,
 	pace: 190,
@@ -126,8 +127,11 @@ export default class Main {
 	#recoveries = 0;
 	#stableFrames = 0;
 	#lastSampleKey = '';
+	#lastCheckpointAt = 0;
+	#runFinalized = false;
 	#currentSeries = { fitness: [], average: [], survival: [], pace: [] };
 	#pastRuns = [];
+	#completedRunCount = 0;
 	#settings = {
 		speed: 2,
 		duration: 'smart',
@@ -165,6 +169,7 @@ export default class Main {
 				passes: document.getElementById('dashboard-passes'),
 				window: document.getElementById('dashboard-window'),
 				difficulty: document.getElementById('dashboard-difficulty'),
+				memory: document.getElementById('dashboard-memory'),
 				promotion: document.getElementById('dashboard-promotion'),
 				nextUnlock: document.getElementById('dashboard-next-unlock'),
 				seed: document.getElementById('dashboard-seed'),
@@ -288,7 +293,7 @@ export default class Main {
 		if (!next) return 2;
 		let consecutive = 0;
 		for (let index = this.#pastRuns.length - 1; index >= 0; index--) {
-			if (this.#pastRuns[index].score < next.milestone) break;
+			if (this.#pastRuns[index].interrupted || this.#pastRuns[index].score < next.milestone) break;
 			consecutive += 1;
 			if (consecutive >= 2) break;
 		}
@@ -534,6 +539,55 @@ export default class Main {
 		return JSON.stringify(this.#activeSensors) !== JSON.stringify(this.#pendingSensors);
 	}
 
+	#safeStoredRun(run, { interrupted = Boolean(run?.interrupted) } = {}) {
+		if (!run || typeof run !== 'object') return null;
+		return {
+			generation: Math.max(0, Math.floor(Number(run.generation) || 0)),
+			seed: Number(run.seed) >>> 0,
+			difficulty: String(run.difficulty || DIFFICULTIES[0].label),
+			score: Math.max(0, Number(run.score) || 0),
+			series: this.#validSeries(run.series),
+			interrupted,
+		};
+	}
+
+	#safeActiveRun(run) {
+		const safe = this.#safeStoredRun(run, { interrupted: true });
+		if (!safe || safe.generation < 1) return null;
+		return {
+			...safe,
+			tick: Math.max(0, Math.floor(Number(run.tick) || 0)),
+			limit: Math.max(0, Math.floor(Number(run.limit) || 0)),
+			extensions: Math.max(0, Math.floor(Number(run.extensions) || 0)),
+			checkpointedAt: Math.max(0, Math.floor(Number(run.checkpointedAt) || 0)),
+		};
+	}
+
+	#activeRunState() {
+		if (this.#runFinalized || !this.#bestCar || this.#generation < 1) return null;
+		return {
+			generation: this.#generation,
+			tick: this.#generationTick,
+			limit: this.#generationLimit,
+			extensions: this.#smartExtensions,
+			seed: this.#trafficSeed,
+			difficulty: this.#difficulty.label,
+			score: Math.max(0, this.#score(this.#bestCar)),
+			series: this.#validSeries(this.#currentSeries),
+			checkpointedAt: Date.now(),
+		};
+	}
+
+	#archiveInterruptedRun(run) {
+		const interrupted = this.#safeActiveRun(run);
+		if (!interrupted) return false;
+		const hasSamples = Object.values(interrupted.series).some((series) => series.length);
+		if (!hasSamples) return false;
+		this.#pastRuns.push(interrupted);
+		this.#pastRuns = this.#pastRuns.slice(-MAX_PAST_RUNS);
+		return true;
+	}
+
 	#loadLabState() {
 		let parsed = null;
 		try {
@@ -543,18 +597,26 @@ export default class Main {
 		}
 
 		const legacy = this.#loadSavedBrain();
-		const stateBrain = parsed?.version === LAB_STATE_VERSION && NeuralNetwork.isValid(parsed.champion)
+		const savedVersion = Math.max(0, Math.floor(Number(parsed?.version) || 0));
+		const stateBrain = savedVersion >= 2 && NeuralNetwork.isValid(parsed.champion)
 			? parsed.champion
 			: legacy.brain;
 		const runs = Array.isArray(parsed?.completedRuns)
-			? parsed.completedRuns.slice(-MAX_PAST_RUNS).map((run) => ({
-				generation: Number(run.generation) || 0,
-				seed: Number(run.seed) || 0,
-				difficulty: String(run.difficulty || DIFFICULTIES[0].label),
-				score: Math.max(0, Number(run.score) || 0),
-				series: this.#validSeries(run.series),
-			}))
+			? parsed.completedRuns.slice(-MAX_PAST_RUNS).map((run) => this.#safeStoredRun(run)).filter(Boolean)
 			: [];
+		if (savedVersion < LAB_STATE_VERSION) {
+			let previousGeneration = 0;
+			for (const run of runs) {
+				run.generation = run.generation > previousGeneration ? run.generation : previousGeneration + 1;
+				previousGeneration = run.generation;
+			}
+		}
+		const activeRun = savedVersion >= LAB_STATE_VERSION ? this.#safeActiveRun(parsed?.activeRun) : null;
+		const latestStoredGeneration = Math.max(0, ...runs.map((run) => run.generation), activeRun?.generation || 0);
+		const generationCount = Math.max(latestStoredGeneration, Math.floor(Number(parsed?.generationCount) || 0));
+		const completedRunCount = savedVersion >= LAB_STATE_VERSION
+			? Math.max(runs.filter((run) => !run.interrupted).length, Math.floor(Number(parsed?.completedRunCount) || 0))
+			: Math.max(runs.length, generationCount);
 		const championFitness = Math.max(0, Number(parsed?.championFitness) || 0);
 		const inferredDifficultyIndex = this.#difficultyIndexForFitness(championFitness);
 		const promotionMode = parsed?.progression?.mode === 'manual' ? 'manual' : 'smart';
@@ -563,6 +625,9 @@ export default class Main {
 			brain: stateBrain,
 			championFitness,
 			completedRuns: runs,
+			completedRunCount,
+			generationCount,
+			activeRun,
 			rewards: this.#safeRewards(parsed?.rewards),
 			activeSensors: this.#safeSensors(parsed?.activeSensors),
 			pendingSensors: this.#safeSensors(parsed?.pendingSensors ?? parsed?.activeSensors),
@@ -580,6 +645,9 @@ export default class Main {
 				champion: NeuralNetwork.isValid(this.#championBrain) ? this.#championBrain : null,
 				championFitness: this.#championFitness,
 				completedRuns: this.#pastRuns.slice(-MAX_PAST_RUNS),
+				completedRunCount: this.#completedRunCount,
+				generationCount: this.#generation,
+				activeRun: this.#activeRunState(),
 				rewards: this.#settings.rewards,
 				activeSensors: this.#activeSensors,
 				pendingSensors: this.#pendingSensors,
@@ -609,8 +677,11 @@ export default class Main {
 			difficulty: this.#difficulty.label,
 			score,
 			series: this.#validSeries(this.#currentSeries),
+			interrupted: false,
 		});
 		this.#pastRuns = this.#pastRuns.slice(-MAX_PAST_RUNS);
+		this.#completedRunCount += 1;
+		this.#runFinalized = true;
 
 		if ((forceChampion || score >= this.#championFitness) && NeuralNetwork.isValid(this.#bestCar.brain)) {
 			this.#championBrain = cloneBrain(this.#bestCar.brain);
@@ -652,6 +723,7 @@ export default class Main {
 		this.#trafficSeed = randomSeed();
 		this.#lastSampleKey = '';
 		this.#currentSeries = this.#emptySeries();
+		this.#runFinalized = false;
 		this.#difficulty = this.#difficultyFor();
 		this.#maxSensorReach = Math.max(80, ...this.#activeSensors.map((sensor) => sensor.length));
 		this.#street = this.#createStreet();
@@ -695,6 +767,8 @@ export default class Main {
 		this.#ui.status.textContent = status ?? (this.#championBrain ? `EVOLVING SAVED CHAMPION · ${this.#difficulty.label}` : 'SEARCHING FROM RANDOM');
 		this.#renderGarage();
 		this.#syncPromotionControls();
+		this.#lastCheckpointAt = Date.now();
+		this.#persistLabState();
 	}
 
 	#loadSavedBrain() {
@@ -711,10 +785,13 @@ export default class Main {
 	}
 
 	#resetPopulation = () => {
+		if (this.#bestCar) this.#persistLabState();
 		const saved = this.#loadLabState();
 		this.#championBrain = saved.brain;
 		this.#championFitness = saved.championFitness;
 		this.#pastRuns = saved.completedRuns;
+		const restoredInterruptedRun = this.#archiveInterruptedRun(saved.activeRun);
+		this.#completedRunCount = saved.completedRunCount;
 		this.#settings.rewards = saved.rewards;
 		this.#settings.promotionMode = saved.promotionMode;
 		this.#smartDifficultyIndex = saved.smartDifficultyIndex;
@@ -723,9 +800,12 @@ export default class Main {
 		this.#pendingSensors = saved.pendingSensors;
 		this.#syncRewardInputs();
 		this.#syncPromotionControls();
-		this.#generation = 0;
+		this.#generation = saved.generationCount;
 		this.#bestCar = null;
-		this.#startGeneration({ keepElite: false, status: saved.status });
+		const memoryStatus = saved.generationCount > 0 || saved.completedRunCount > 0
+			? `RESTORED ${saved.completedRunCount} RUNS · CONTINUING AT GEN ${saved.generationCount + 1}${restoredInterruptedRun ? ' · LAST TRACE SAVED' : ''}`
+			: saved.status;
+		this.#startGeneration({ keepElite: false, status: memoryStatus });
 		if (!this.#running) {
 			this.#running = true;
 			this.#animation = window.requestAnimationFrame(this.#animate);
@@ -1075,6 +1155,7 @@ export default class Main {
 		dashboard.pace.textContent = `${breakdown.averageSpeed.toFixed(1)} / ${this.#settings.pace.toFixed(1)}`;
 		dashboard.passes.textContent = String(snapshot.passes);
 		dashboard.window.textContent = `${Math.round(this.#generationLimit / TICKS_PER_SECOND)} S${this.#smartExtensions ? ` · +${this.#smartExtensions}` : ''}`;
+		dashboard.memory.textContent = `${this.#completedRunCount} SAVED`;
 		dashboard.difficulty.textContent = this.#difficulty.label;
 		dashboard.promotion.textContent = this.#settings.promotionMode === 'smart' ? 'SMART / 2 RUNS' : 'MANUAL / USER';
 		const nextDifficulty = this.#nextDifficulty();
@@ -1106,6 +1187,11 @@ export default class Main {
 			this.#renderChart(dashboard.charts.average, 'average');
 			this.#renderChart(dashboard.charts.survival, 'survival', { min: 0, max: 100 });
 			this.#renderChart(dashboard.charts.pace, 'pace', { min: 0, max: this.#settings.pace * 1.1 });
+			const now = Date.now();
+			if (now - this.#lastCheckpointAt >= CHECKPOINT_INTERVAL_MS) {
+				this.#lastCheckpointAt = now;
+				this.#persistLabState();
+			}
 		}
 		dashboard.sample.textContent = String(this.#currentSeries.fitness.length).padStart(3, '0');
 
@@ -1127,6 +1213,8 @@ export default class Main {
 
 	#recover(error) {
 		console.error('Neural-car runtime recovered from an invalid frame.', error);
+		this.#archiveInterruptedRun(this.#activeRunState());
+		this.#runFinalized = true;
 		this.#recoveries += 1;
 		this.#stableFrames = 0;
 		if (!NeuralNetwork.isValid(this.#bestCar?.brain)) {
@@ -1171,6 +1259,8 @@ export default class Main {
 		this.#resetPopulation();
 		this.#animation = window.requestAnimationFrame(this.#animate);
 	};
+
+	checkpoint = () => this.#persistLabState();
 
 	resize({ width, height, netWidth }) {
 		const horizontalShift = width / 2 - this.#width / 2;
