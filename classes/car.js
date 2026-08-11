@@ -6,7 +6,7 @@ import NeuralNetwork from './network';
 export default class Car {
 	#ROT_ANGLE = 0.015;
 
-	constructor(x, y, w, h, controlType) {
+	constructor(x, y, w, h, controlType, options = {}) {
 		this.x = x;
 		this.y = y;
 		this.width = w;
@@ -17,7 +17,7 @@ export default class Car {
 
 		this.speed = 0;
 
-		this.maxSpeed = 2;
+		this.maxSpeed = options.maxSpeed ?? 2;
 		this.acceleration = 0.2;
 		this.friction = 0.05;
 
@@ -26,13 +26,13 @@ export default class Car {
 		if (controlType != 'DUMMY') {
 			this.sensor = new Sensor(this);
 			this.brain = new NeuralNetwork([this.sensor.rayCount, 6, 4]);
-			this.maxSpeed = 2.5;
+			this.maxSpeed = options.maxSpeed ?? 2.5;
 			this.color = 'green';
 		}
 		this.controls = new Controls(controlType);
 
 		this.damaged = false;
-		this.polygon = [];
+		this.polygon = this.#createPolygon();
 	}
 
 	#assessDamage(roadBorders, traffic) {
@@ -143,8 +143,9 @@ export default class Car {
 		}
 	}
 
-	draw(ctx, drawSensors) {
+	draw(ctx, drawSensors, highlight = false) {
 		ctx.fillStyle = this.color;
+		if (highlight) ctx.fillStyle = '#d6f05f';
 
 		if (this.damaged) {
 			ctx.fillStyle = 'red';

@@ -5,20 +5,77 @@
 		<meta http-equiv="X-UA-Compatible" content="IE=edge" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		<title>Five Rays Into Four Decisions · Pinonite Source Lab</title>
+		<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 		<link rel="stylesheet" href="/style.css" />
 	</head>
 	<body>
 		<header class="docket">
 			<div><strong>PINONITE / SOURCE LAB</strong><span>FIVE RAYS INTO FOUR DECISIONS</span></div>
-			<span>EVOLUTIONARY DRIVING · LIVE</span>
+			<span id="run-status">EVOLUTIONARY DRIVING · LIVE</span>
 		</header>
-		<canvas id="canvas"></canvas>
-		<div class="vertical-buttons">
-			<button id="save-brain" title="Save the leading network">SAVE CHAMPION</button>
-			<button id="delete-brain" title="Discard the saved network">DISCARD SAVED</button>
-		</div>
-		<canvas id="network"></canvas>
-		<div class="legend"><span>LEFT / ROAD + SENSOR RAYS</span><span>RIGHT / 5 → 6 → 4 NETWORK</span></div>
+
+		<canvas id="canvas" aria-label="Road simulation with neural cars and traffic"></canvas>
+		<canvas id="network" aria-label="Neural network activity for the current champion"></canvas>
+
+		<section class="lab-console" aria-label="Evolution controls and live results">
+			<div class="telemetry" aria-live="polite">
+				<div><output id="generation-value">01</output><span>GEN</span></div>
+				<div><output id="active-value">120</output><span>ACTIVE</span></div>
+				<div title="Progress + pace + overtakes − tailing − idling − collisions">
+					<output id="score-value">0</output><span>FITNESS</span>
+				</div>
+				<div><output id="passes-value">00</output><span>PASSES</span></div>
+				<meter id="generation-progress" min="0" max="1" value="0" aria-label="Generation progress"></meter>
+			</div>
+
+			<div class="tuning">
+				<label>
+					<span>SIM SPEED</span>
+					<select id="sim-speed">
+						<option value="1">1×</option>
+						<option value="2" selected>2×</option>
+						<option value="4">4×</option>
+					</select>
+				</label>
+				<label>
+					<span>MUTATION <output id="mutation-output">12%</output></span>
+					<input id="mutation-rate" type="range" min="0.03" max="0.3" step="0.01" value="0.12" />
+				</label>
+				<label>
+					<span>PACE TARGET <output id="pace-output">3.2</output></span>
+					<input id="pace-target" type="range" min="2.5" max="4" step="0.1" value="3.2" />
+				</label>
+				<label>
+					<span>TRAFFIC</span>
+					<select id="traffic-density">
+						<option value="sparse">SPARSE</option>
+						<option value="standard" selected>STANDARD</option>
+						<option value="dense">DENSE</option>
+					</select>
+				</label>
+				<label>
+					<span>POPULATION</span>
+					<select id="population-size">
+						<option value="60">60</option>
+						<option value="120" selected>120</option>
+						<option value="200">200</option>
+					</select>
+				</label>
+				<label class="toggle">
+					<input id="auto-evolve" type="checkbox" checked />
+					<span>AUTO-EVOLVE</span>
+				</label>
+			</div>
+
+			<div class="actions">
+				<button id="next-generation" title="Score this run and mutate its champion">NEXT GENERATION ↗</button>
+				<button id="reset-run" title="Restart from the saved champion, or from random networks">RESET RUN</button>
+				<button id="save-brain" title="Save the current fitness champion in this browser">SAVE CHAMPION</button>
+				<button id="delete-brain" title="Discard the locally saved champion">DISCARD SAVED</button>
+			</div>
+		</section>
+
+		<div class="legend"><span>ROAD + FIVE RAYS</span><span>5 → 6 → 4 NETWORK</span></div>
 		<script type="module" src="/app.js"></script>
 	</body>
 </html>

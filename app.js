@@ -1,6 +1,5 @@
 import Main from './main.js';
 
-let animation;
 let mainEvent;
 
 window.onload = () => {
@@ -21,15 +20,17 @@ window.onload = () => {
 			ctx,
 			width: canvas.width,
 			height: canvas.height,
-			animation,
 			netCtx,
 			netWidth: netCanvas.width,
 		});
 		mainEvent.init();
 	};
 
-	// change canvas size as browser window resizes
-	window.addEventListener('resize', start);
+	let resizeTimer;
+	window.addEventListener('resize', () => {
+		window.clearTimeout(resizeTimer);
+		resizeTimer = window.setTimeout(start, 120);
+	});
 
 	// initiate simulation
 	start();
