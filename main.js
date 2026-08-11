@@ -623,7 +623,7 @@ export default class Main {
 	};
 
 	#roadWidth() {
-		return Math.min(ROAD_WIDTH, Math.max(240, this.#width - 16));
+		return ROAD_WIDTH;
 	}
 
 	init = () => {
