@@ -39,6 +39,8 @@
 							<div><dt>ALIVE</dt><dd id="dashboard-alive">100%</dd></div>
 							<div><dt>PACE</dt><dd id="dashboard-pace">0.0 / 3.2</dd></div>
 							<div><dt>OVERTAKES</dt><dd id="dashboard-passes">0</dd></div>
+							<div><dt>WINDOW</dt><dd id="dashboard-window">25 S</dd></div>
+							<div><dt>TRAFFIC SEED</dt><dd id="dashboard-seed">000000</dd></div>
 						</dl>
 
 						<h2>FITNESS LEDGER</h2>
@@ -116,12 +118,25 @@
 					</select>
 				</label>
 				<label>
+					<span>RUN WINDOW</span>
+					<select id="episode-duration" title="Smart starts at 25 seconds and can extend to 60 when pace, passing, and lane-change quality remain high">
+						<option value="smart" selected>SMART</option>
+						<option value="short">15 S</option>
+						<option value="standard">25 S</option>
+						<option value="long">45 S</option>
+					</select>
+				</label>
+				<label>
 					<span>MUTATION <output id="mutation-output">12%</output></span>
 					<input id="mutation-rate" type="range" min="0.03" max="0.3" step="0.01" value="0.12" />
 				</label>
 				<label>
 					<span>PACE TARGET <output id="pace-output">3.2</output></span>
 					<input id="pace-target" type="range" min="2.5" max="4" step="0.1" value="3.2" />
+				</label>
+				<label>
+					<span>ACCEL <output id="acceleration-output">1.6×</output></span>
+					<input id="acceleration-factor" type="range" min="1" max="2.5" step="0.1" value="1.6" />
 				</label>
 				<label>
 					<span>TRAFFIC</span>
@@ -139,9 +154,9 @@
 						<option value="200">200</option>
 					</select>
 				</label>
-				<label class="toggle">
+				<label class="toggle" title="Advance automatically when the run window ends">
 					<input id="auto-evolve" type="checkbox" checked />
-					<span>AUTO-EVOLVE</span>
+					<span>AUTO</span>
 				</label>
 			</div>
 

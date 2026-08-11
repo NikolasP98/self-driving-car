@@ -19,6 +19,7 @@ export default class Car {
 
 		this.maxSpeed = options.maxSpeed ?? 2;
 		this.acceleration = 0.2;
+		this.accelerationFactor = options.accelerationFactor ?? 1;
 		this.friction = 0.05;
 
 		this.useBrain = controlType == 'AI';
@@ -76,12 +77,20 @@ export default class Car {
 	}
 
 	#move() {
-		// Handle Vertical Movement
-		if (this.controls.forward) {
-			this.speed += this.acceleration;
-		}
+		// Reverse acts as an intentional brake before it becomes reverse thrust.
+		// Releasing both pedals preserves momentum and lets rolling drag slow the car.
 		if (this.controls.reverse) {
-			this.speed -= this.acceleration;
+			if (this.speed > 0) {
+				this.speed -= this.acceleration * this.accelerationFactor * 1.35;
+			} else {
+				this.speed -= this.acceleration * this.accelerationFactor * 0.75;
+			}
+		} else if (this.controls.forward) {
+			this.speed += this.acceleration * this.accelerationFactor;
+		} else if (this.speed > 0) {
+			this.speed = Math.max(0, this.speed - this.friction * 0.45);
+		} else if (this.speed < 0) {
+			this.speed = Math.min(0, this.speed + this.friction * 0.45);
 		}
 
 		// Handle max speed
@@ -92,16 +101,8 @@ export default class Car {
 			this.speed = -this.maxSpeed / 2;
 		}
 
-		// Handle friction
-		if (this.speed > 0) {
-			this.speed -= this.friction;
-		}
-		if (this.speed < 0) {
-			this.speed += this.friction;
-		}
-
-		// Handle full stop
-		if (Math.abs(this.speed) < this.friction) {
+		// Settle tiny floating-point motion only after coasting has nearly stopped.
+		if (!this.controls.forward && !this.controls.reverse && Math.abs(this.speed) < this.friction * 0.45) {
 			this.speed = 0;
 		}
 

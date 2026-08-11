@@ -4,12 +4,27 @@ import Street from './classes/street';
 import Visualizer from './classes/visualizer';
 
 const START_Y = 100;
-const GENERATION_TICKS = 1500;
+const ROAD_WIDTH = 320;
+const TICKS_PER_SECOND = 60;
+const DURATION_TICKS = {
+	short: 15 * TICKS_PER_SECOND,
+	standard: 25 * TICKS_PER_SECOND,
+	long: 45 * TICKS_PER_SECOND,
+	smart: 25 * TICKS_PER_SECOND,
+};
+const SMART_EXTENSION_TICKS = 15 * TICKS_PER_SECOND;
+const SMART_MAX_TICKS = 60 * TICKS_PER_SECOND;
 const MIN_GENERATION_TICKS = 240;
 const MAX_SAMPLES = 80;
 
 const cloneBrain = (brain) => JSON.parse(JSON.stringify(brain));
 const signed = (value, sign = '+') => `${sign}${Math.round(Math.max(0, value))}`;
+const randomSeed = () => {
+	if (globalThis.crypto?.getRandomValues) {
+		return globalThis.crypto.getRandomValues(new Uint32Array(1))[0];
+	}
+	return Math.floor(Math.random() * 4294967296);
+};
 
 const seededRandom = (seed) => {
 	let state = seed >>> 0;
@@ -39,6 +54,28 @@ const chartPath = (values, bounds = {}) => {
 	return { line, area };
 };
 
+export const qualifiesForSmartExtension = ({
+	mode,
+	atMaximum,
+	damaged,
+	paceRatio,
+	passes,
+	laneChanges,
+	tailingRatio,
+	idleRatio,
+	nonProgressQuality,
+	extensionCount,
+}) =>
+	mode === 'smart' &&
+	!atMaximum &&
+	!damaged &&
+	paceRatio >= 0.82 &&
+	passes >= 2 + extensionCount * 2 &&
+	laneChanges >= Math.min(2, extensionCount + 1) &&
+	tailingRatio < 0.12 &&
+	idleRatio < 0.18 &&
+	nonProgressQuality >= 520 + extensionCount * 260;
+
 export default class Main {
 	#ctx;
 	#netCtx;
@@ -53,6 +90,9 @@ export default class Main {
 	#championBrain = null;
 	#generation = 0;
 	#generationTick = 0;
+	#generationLimit = DURATION_TICKS.smart;
+	#smartExtensions = 0;
+	#trafficSeed = 0;
 	#animation = 0;
 	#running = false;
 	#recoveries = 0;
@@ -62,8 +102,10 @@ export default class Main {
 	#series = { fitness: [], average: [], survival: [], pace: [] };
 	#settings = {
 		speed: 2,
+		duration: 'smart',
 		mutation: 0.12,
 		pace: 3.2,
+		acceleration: 1.6,
 		traffic: 'standard',
 		population: 120,
 		autoEvolve: true,
@@ -91,6 +133,8 @@ export default class Main {
 				alive: document.getElementById('dashboard-alive'),
 				pace: document.getElementById('dashboard-pace'),
 				passes: document.getElementById('dashboard-passes'),
+				window: document.getElementById('dashboard-window'),
+				seed: document.getElementById('dashboard-seed'),
 				progressReward: document.getElementById('reward-progress'),
 				paceReward: document.getElementById('reward-pace'),
 				passesReward: document.getElementById('reward-passes'),
@@ -128,6 +172,7 @@ export default class Main {
 			{ length: this.#settings.population },
 			() => new Car(this.#street.getCenterLane(1), START_Y, 50, 80, 'AI', {
 				maxSpeed: this.#settings.pace,
+				accelerationFactor: this.#settings.acceleration,
 			})
 		);
 	}
@@ -139,13 +184,13 @@ export default class Main {
 			dense: { gap: 350, rows: 42, secondCarChance: 0.72 },
 		};
 		const profile = profiles[this.#settings.traffic] ?? profiles.standard;
-		const random = seededRandom(9801);
+		const random = seededRandom(this.#trafficSeed);
 		const traffic = [];
 
 		for (let row = 0; row < profile.rows; row++) {
 			const firstLane = Math.floor(random() * this.#street.laneCount);
 			const secondLane = (firstLane + 1 + Math.floor(random() * 2)) % this.#street.laneCount;
-			const y = -620 - row * profile.gap;
+			const y = -620 - row * profile.gap - random() * profile.gap * 0.32;
 			traffic.push(
 				new Car(this.#street.getCenterLane(firstLane), y, 50, 80, 'DUMMY', {
 					maxSpeed: 1.9 + random() * 0.28,
@@ -166,6 +211,11 @@ export default class Main {
 
 	#metricFor(car) {
 		return this.#metrics.get(car);
+	}
+
+	#laneIndexFor(x) {
+		const laneWidth = this.#street.width / this.#street.laneCount;
+		return Math.max(0, Math.min(this.#street.laneCount - 1, Math.floor((x - this.#street.left) / laneWidth)));
 	}
 
 	#scoreBreakdown(car) {
@@ -206,6 +256,11 @@ export default class Main {
 		metric.ticks += 1;
 		metric.speedTotal += Math.max(0, car.speed);
 		if (car.speed < this.#settings.pace * 0.52) metric.idleTicks += 1;
+		const laneIndex = this.#laneIndexFor(car.x);
+		if (laneIndex !== metric.lastLane) {
+			metric.lastLane = laneIndex;
+			metric.laneChanges += 1;
+		}
 
 		let nearestAhead = Number.POSITIVE_INFINITY;
 		for (const obstacle of this.#traffic) {
@@ -236,6 +291,43 @@ export default class Main {
 		this.#bestCar = leader;
 	}
 
+	#baseDurationTicks() {
+		return DURATION_TICKS[this.#settings.duration] ?? DURATION_TICKS.smart;
+	}
+
+	#shouldExtendSmartRun() {
+		if (this.#settings.duration !== 'smart' || this.#generationLimit >= SMART_MAX_TICKS) return false;
+		const metric = this.#metricFor(this.#bestCar);
+		const breakdown = this.#scoreBreakdown(this.#bestCar);
+		if (!metric?.ticks || this.#bestCar.damaged) return false;
+
+		const paceRatio = breakdown.averageSpeed / Math.max(0.1, this.#settings.pace);
+		const tailingRatio = metric.followingTicks / metric.ticks;
+		const idleRatio = metric.idleTicks / metric.ticks;
+		const nonProgressQuality = breakdown.pace + breakdown.passing - breakdown.tailing - breakdown.idle;
+
+		return qualifiesForSmartExtension({
+			mode: this.#settings.duration,
+			atMaximum: this.#generationLimit >= SMART_MAX_TICKS,
+			damaged: this.#bestCar.damaged,
+			paceRatio,
+			passes: metric.passes,
+			laneChanges: metric.laneChanges,
+			tailingRatio,
+			idleRatio,
+			nonProgressQuality,
+			extensionCount: this.#smartExtensions,
+		});
+	}
+
+	#extendSmartRun() {
+		if (!this.#shouldExtendSmartRun()) return false;
+		this.#generationLimit = Math.min(SMART_MAX_TICKS, this.#generationLimit + SMART_EXTENSION_TICKS);
+		this.#smartExtensions += 1;
+		this.#ui.status.textContent = `SMART WINDOW EXTENDED · ${Math.round(this.#generationLimit / TICKS_PER_SECOND)}S`;
+		return true;
+	}
+
 	#startGeneration({ keepElite = true, status = null } = {}) {
 		if (keepElite && NeuralNetwork.isValid(this.#bestCar?.brain)) {
 			this.#championBrain = cloneBrain(this.#bestCar.brain);
@@ -244,13 +336,25 @@ export default class Main {
 
 		this.#generation += 1;
 		this.#generationTick = 0;
+		this.#generationLimit = this.#baseDurationTicks();
+		this.#smartExtensions = 0;
+		this.#trafficSeed = randomSeed();
 		this.#lastSampleKey = '';
 		this.#traffic = this.#generateTraffic();
 		this.#cars = this.#generateCars();
 		this.#metrics = new Map(
 			this.#cars.map((car) => [
 				car,
-				{ ticks: 0, speedTotal: 0, idleTicks: 0, followingTicks: 0, passes: 0, passed: new Set() },
+				{
+					ticks: 0,
+					speedTotal: 0,
+					idleTicks: 0,
+					followingTicks: 0,
+					passes: 0,
+					passed: new Set(),
+					lastLane: 1,
+					laneChanges: 0,
+				},
 			])
 		);
 
@@ -314,22 +418,33 @@ export default class Main {
 
 	#bindControls() {
 		const speed = document.getElementById('sim-speed');
+		const duration = document.getElementById('episode-duration');
 		const mutation = document.getElementById('mutation-rate');
 		const mutationOutput = document.getElementById('mutation-output');
 		const pace = document.getElementById('pace-target');
 		const paceOutput = document.getElementById('pace-output');
+		const acceleration = document.getElementById('acceleration-factor');
+		const accelerationOutput = document.getElementById('acceleration-output');
 		const trafficDensity = document.getElementById('traffic-density');
 		const population = document.getElementById('population-size');
 		const autoEvolve = document.getElementById('auto-evolve');
 
 		this.#settings.speed = Number(speed.value);
+		this.#settings.duration = duration.value;
 		this.#settings.mutation = Number(mutation.value);
 		this.#settings.pace = Number(pace.value);
+		this.#settings.acceleration = Number(acceleration.value);
 		this.#settings.traffic = trafficDensity.value;
 		this.#settings.population = Number(population.value);
 		this.#settings.autoEvolve = autoEvolve.checked;
 
 		speed.onchange = () => (this.#settings.speed = Number(speed.value));
+		duration.onchange = () => {
+			this.#settings.duration = duration.value;
+			this.#smartExtensions = 0;
+			this.#generationLimit = Math.max(this.#generationTick + TICKS_PER_SECOND, this.#baseDurationTicks());
+			this.#ui.status.textContent = `RUN WINDOW · ${duration.options[duration.selectedIndex].text}`;
+		};
 		mutation.oninput = () => {
 			this.#settings.mutation = Number(mutation.value);
 			mutationOutput.value = `${Math.round(this.#settings.mutation * 100)}%`;
@@ -338,6 +453,11 @@ export default class Main {
 			this.#settings.pace = Number(pace.value);
 			paceOutput.value = this.#settings.pace.toFixed(1);
 			for (const car of this.#cars) car.maxSpeed = this.#settings.pace;
+		};
+		acceleration.oninput = () => {
+			this.#settings.acceleration = Number(acceleration.value);
+			accelerationOutput.value = `${this.#settings.acceleration.toFixed(1)}×`;
+			for (const car of this.#cars) car.accelerationFactor = this.#settings.acceleration;
 		};
 		trafficDensity.onchange = () => {
 			this.#settings.traffic = trafficDensity.value;
@@ -365,9 +485,13 @@ export default class Main {
 		this.#selectBest();
 
 		const activeCars = this.#cars.reduce((count, car) => count + (car.damaged ? 0 : 1), 0);
-		const finished = this.#generationTick >= GENERATION_TICKS;
+		const finished = this.#generationTick >= this.#generationLimit;
 		const exhausted = activeCars === 0 && this.#generationTick >= MIN_GENERATION_TICKS;
-		if (this.#settings.autoEvolve && (finished || exhausted)) this.#nextGeneration();
+		if (this.#settings.autoEvolve && exhausted) {
+			this.#nextGeneration();
+		} else if (this.#settings.autoEvolve && finished && !this.#extendSmartRun()) {
+			this.#nextGeneration();
+		}
 	}
 
 	#draw(time) {
@@ -423,6 +547,8 @@ export default class Main {
 		dashboard.alive.textContent = `${Math.round(snapshot.alivePercent)}%`;
 		dashboard.pace.textContent = `${breakdown.averageSpeed.toFixed(1)} / ${this.#settings.pace.toFixed(1)}`;
 		dashboard.passes.textContent = String(snapshot.passes);
+		dashboard.window.textContent = `${Math.round(this.#generationLimit / TICKS_PER_SECOND)} S${this.#smartExtensions ? ` · +${this.#smartExtensions}` : ''}`;
+		dashboard.seed.textContent = this.#trafficSeed.toString(16).toUpperCase().padStart(8, '0').slice(-8);
 		dashboard.progressReward.textContent = signed(breakdown.progress);
 		dashboard.paceReward.textContent = signed(breakdown.pace);
 		dashboard.passesReward.textContent = signed(breakdown.passing);
@@ -461,7 +587,7 @@ export default class Main {
 		this.#ui.active.textContent = String(snapshot.active);
 		this.#ui.score.textContent = String(Math.max(0, Math.round(snapshot.breakdown.total)));
 		this.#ui.passes.textContent = String(snapshot.passes).padStart(2, '0');
-		this.#ui.progress.value = Math.min(1, this.#generationTick / GENERATION_TICKS);
+		this.#ui.progress.value = Math.min(1, this.#generationTick / this.#generationLimit);
 		this.#updateDashboard(snapshot);
 	}
 
@@ -496,8 +622,12 @@ export default class Main {
 		}
 	};
 
+	#roadWidth() {
+		return Math.min(ROAD_WIDTH, Math.max(240, this.#width - 16));
+	}
+
 	init = () => {
-		this.#street = new Street(this.#width / 2, this.#width * 0.86);
+		this.#street = new Street(this.#width / 2, this.#roadWidth());
 		this.#bindControls();
 		this.#running = true;
 		this.#resetPopulation();
@@ -505,15 +635,15 @@ export default class Main {
 	};
 
 	resize({ width, height, netWidth }) {
-		const horizontalScale = this.#width ? width / this.#width : 1;
-		if (Number.isFinite(horizontalScale) && horizontalScale > 0 && horizontalScale !== 1) {
-			for (const car of this.#cars) car.x *= horizontalScale;
-			for (const obstacle of this.#traffic) obstacle.x *= horizontalScale;
+		const horizontalShift = width / 2 - this.#width / 2;
+		if (Number.isFinite(horizontalShift) && horizontalShift !== 0) {
+			for (const car of this.#cars) car.x += horizontalShift;
+			for (const obstacle of this.#traffic) obstacle.x += horizontalShift;
 		}
 		this.#width = width;
 		this.#height = height;
 		this.#netWidth = netWidth;
-		this.#street = new Street(this.#width / 2, this.#width * 0.86);
+		this.#street = new Street(this.#width / 2, this.#roadWidth());
 	}
 
 	stop() {
