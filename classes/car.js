@@ -16,6 +16,7 @@ export default class Car {
 		this.color = 'yellow';
 
 		this.speed = 0;
+		this.steering = null;
 
 		this.maxSpeed = options.maxSpeed ?? 2;
 		this.acceleration = 0.2;
@@ -109,12 +110,10 @@ export default class Car {
 		// Handle Horizontal movement
 		if (this.speed != 0) {
 			const flip = this.speed > 0 ? 1 : -1;
-			if (this.controls.left) {
-				this.angle += this.#ROT_ANGLE * flip;
-			}
-			if (this.controls.right) {
-				this.angle -= this.#ROT_ANGLE * flip;
-			}
+			const steering = Number.isFinite(this.steering)
+				? Math.max(-1, Math.min(1, this.steering))
+				: Number(this.controls.left) - Number(this.controls.right);
+			this.angle += this.#ROT_ANGLE * flip * steering;
 		}
 
 		this.y -= Math.cos(this.angle) * this.speed;
@@ -122,13 +121,12 @@ export default class Car {
 	}
 
 	update(roadBorders, traffic) {
-		if (!this.damaged) {
-			this.#move();
-			this.polygon = this.#createPolygon();
-			this.damaged = this.#assessDamage(roadBorders, traffic);
-		}
+		if (this.damaged) return;
+		this.#move();
+		this.polygon = this.#createPolygon();
+		this.damaged = this.#assessDamage(roadBorders, traffic);
 
-		if (this.sensor) {
+		if (this.sensor && !this.damaged) {
 			this.sensor.update(roadBorders, traffic);
 			const offsets = this.sensor.readings.map((s) =>
 				s == null ? 0 : 1 - s.offset
@@ -142,6 +140,15 @@ export default class Car {
 				this.controls.reverse = outputs[3];
 			}
 		}
+	}
+
+	followPath({ x, y, angle, speed }) {
+		this.x = x;
+		this.y = y;
+		this.angle = angle;
+		this.speed = Math.min(this.maxSpeed, Math.max(0, speed));
+		this.damaged = false;
+		this.polygon = this.#createPolygon();
 	}
 
 	draw(ctx, drawSensors, highlight = false) {

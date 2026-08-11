@@ -29,9 +29,10 @@ const REWARD_DEFAULTS = Object.freeze({
 	collision: 900,
 });
 const DIFFICULTIES = Object.freeze([
-	{ label: 'STRAIGHT / STATIC', curveAmplitude: 0, laneChanges: false, milestone: 0 },
-	{ label: 'CURVED ROAD', curveAmplitude: 58, laneChanges: false, milestone: 2200 },
-	{ label: 'CURVES + LANE CHANGES', curveAmplitude: 72, laneChanges: true, milestone: 4500 },
+	{ label: 'STRAIGHT / TRAFFIC', unlockLabel: 'STRAIGHT', curveAmplitude: 0, curveWavelength: 5200, laneChanges: false, milestone: 0 },
+	{ label: 'CURVED ROAD / TRAFFIC', unlockLabel: 'CURVES', curveAmplitude: 58, curveWavelength: 5200, laneChanges: false, milestone: 8500 },
+	{ label: 'CURVES + LANE CHANGES', unlockLabel: 'LANE CHANGES', curveAmplitude: 72, curveWavelength: 4800, laneChanges: true, milestone: 16000 },
+	{ label: 'DYNAMIC TRAFFIC', unlockLabel: 'DYNAMIC', curveAmplitude: 82, curveWavelength: 4100, laneChanges: true, milestone: 26000 },
 ]);
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const cloneSensors = (sensors) => sensors.map((sensor) => ({ ...sensor }));
@@ -112,6 +113,7 @@ export default class Main {
 	#difficulty = DIFFICULTIES[0];
 	#activeSensors = cloneSensors(DEFAULT_SENSOR_CONFIG);
 	#pendingSensors = cloneSensors(DEFAULT_SENSOR_CONFIG);
+	#maxSensorReach = 200;
 	#generation = 0;
 	#generationTick = 0;
 	#generationLimit = DURATION_TICKS.smart;
@@ -160,6 +162,7 @@ export default class Main {
 				passes: document.getElementById('dashboard-passes'),
 				window: document.getElementById('dashboard-window'),
 				difficulty: document.getElementById('dashboard-difficulty'),
+				nextUnlock: document.getElementById('dashboard-next-unlock'),
 				seed: document.getElementById('dashboard-seed'),
 				progressReward: document.getElementById('reward-progress'),
 				paceReward: document.getElementById('reward-pace'),
@@ -225,8 +228,10 @@ export default class Main {
 			traffic.push(firstCar);
 			this.#trafficStates.set(firstCar, {
 				lane: firstLane,
-				targetLane: firstLane,
-				nextChangeTick: 220 + Math.floor(random() * 900),
+				lanePosition: firstLane,
+				change: null,
+				nextChangeTick: 900 + Math.floor(random() * 1200),
+				changeAffinity: random(),
 				random,
 			});
 
@@ -238,8 +243,10 @@ export default class Main {
 				traffic.push(secondCar);
 				this.#trafficStates.set(secondCar, {
 					lane: secondLane,
-					targetLane: secondLane,
-					nextChangeTick: 220 + Math.floor(random() * 900),
+					lanePosition: secondLane,
+					change: null,
+					nextChangeTick: 900 + Math.floor(random() * 1200),
+					changeAffinity: random(),
 					random,
 				});
 			}
@@ -252,29 +259,85 @@ export default class Main {
 		return [...DIFFICULTIES].reverse().find((tier) => fitness >= tier.milestone) ?? DIFFICULTIES[0];
 	}
 
+	#nextDifficulty() {
+		const index = DIFFICULTIES.indexOf(this.#difficulty);
+		return DIFFICULTIES[index + 1] ?? null;
+	}
+
 	#createStreet() {
 		const curvePhase = (this.#trafficSeed % 10000) - 5000;
 		return new Street(this.#width / 2, this.#roadWidth(), 3, {
 			curveAmplitude: this.#difficulty.curveAmplitude,
+			curveWavelength: this.#difficulty.curveWavelength,
 			curvePhase,
 		});
 	}
 
-	#steerTraffic(obstacle) {
+	#laneIsClear(obstacle, lane) {
+		const targetX = this.#street.getCenterLane(lane, obstacle.y);
+		return !this.#traffic.some(
+			(other) =>
+				other !== obstacle &&
+				Math.abs(other.y - obstacle.y) < 260 &&
+				Math.abs(other.x - targetX) < 64
+		);
+	}
+
+	#advanceTraffic(obstacle) {
 		const state = this.#trafficStates.get(obstacle);
-		if (!state || obstacle.damaged) return;
-		if (this.#difficulty.laneChanges && this.#generationTick >= state.nextChangeTick) {
-			const direction = state.random() < 0.5 ? -1 : 1;
-			state.targetLane = Math.max(0, Math.min(this.#street.laneCount - 1, state.lane + direction));
-			state.nextChangeTick = this.#generationTick + 360 + Math.floor(state.random() * 780);
+		if (!state) return;
+
+		const affinityThreshold = this.#difficulty.milestone >= 26000 ? 0.5 : 0.3;
+		if (
+			this.#difficulty.laneChanges &&
+			!state.change &&
+			this.#generationTick >= state.nextChangeTick &&
+			state.changeAffinity <= affinityThreshold
+		) {
+			const direction = state.lane <= 0 ? 1 : state.lane >= this.#street.laneCount - 1 ? -1 : state.random() < 0.5 ? -1 : 1;
+			const targetLane = Math.max(0, Math.min(this.#street.laneCount - 1, state.lane + direction));
+			if (this.#laneIsClear(obstacle, targetLane)) {
+				state.change = {
+					from: state.lane,
+					to: targetLane,
+					progress: 0,
+					duration: 220 + Math.floor(state.random() * 120),
+				};
+			}
 		}
 
-		const lookAheadY = obstacle.y - 150;
-		const targetX = this.#street.getCenterLane(state.targetLane, lookAheadY);
-		const error = targetX - obstacle.x;
-		obstacle.controls.left = error < -5;
-		obstacle.controls.right = error > 5;
-		if (Math.abs(error) < 11) state.lane = state.targetLane;
+		if (this.#generationTick >= state.nextChangeTick && !state.change) {
+			const minimumWait = this.#difficulty.milestone >= 26000 ? 720 : 1100;
+			state.nextChangeTick = this.#generationTick + minimumWait + Math.floor(state.random() * 1100);
+		}
+
+		if (state.change) {
+			state.change.progress = Math.min(1, state.change.progress + 1 / state.change.duration);
+			const progress = state.change.progress;
+			const eased = progress * progress * (3 - 2 * progress);
+			state.lanePosition = state.change.from + (state.change.to - state.change.from) * eased;
+			if (progress >= 1) {
+				state.lane = state.change.to;
+				state.lanePosition = state.lane;
+				state.change = null;
+				const minimumWait = this.#difficulty.milestone >= 26000 ? 720 : 1100;
+				state.nextChangeTick = this.#generationTick + minimumWait + Math.floor(state.random() * 1100);
+			}
+		}
+
+		const speed = Math.min(obstacle.maxSpeed, obstacle.speed + obstacle.acceleration * 0.32);
+		const nextY = obstacle.y - speed;
+		const nextX = this.#street.getCenterLane(state.lanePosition, nextY);
+		const angle = Math.atan2(-(nextX - obstacle.x), Math.max(0.1, obstacle.y - nextY));
+		obstacle.followPath({ x: nextX, y: nextY, angle, speed });
+	}
+
+	#nearbyTrafficFor(car) {
+		const verticalRange = this.#maxSensorReach + 130;
+		const horizontalRange = this.#street.width * 0.8;
+		return this.#traffic.filter(
+			(obstacle) => Math.abs(obstacle.y - car.y) <= verticalRange && Math.abs(obstacle.x - car.x) <= horizontalRange
+		);
 	}
 
 	#metricFor(car) {
@@ -318,7 +381,7 @@ export default class Main {
 		return this.#scoreBreakdown(car).total;
 	}
 
-	#recordMetrics(car) {
+	#recordMetrics(car, nearbyTraffic) {
 		const metric = this.#metricFor(car);
 		if (!metric || car.damaged) return;
 
@@ -332,7 +395,7 @@ export default class Main {
 		}
 
 		let nearestAhead = Number.POSITIVE_INFINITY;
-		for (const obstacle of this.#traffic) {
+		for (const obstacle of nearbyTraffic) {
 			const gap = car.y - obstacle.y;
 			if (gap > 0 && Math.abs(car.x - obstacle.x) < 72) {
 				nearestAhead = Math.min(nearestAhead, gap);
@@ -538,6 +601,7 @@ export default class Main {
 		this.#lastSampleKey = '';
 		this.#currentSeries = this.#emptySeries();
 		this.#difficulty = this.#difficultyFor();
+		this.#maxSensorReach = Math.max(80, ...this.#activeSensors.map((sensor) => sensor.length));
 		this.#street = this.#createStreet();
 		this.#traffic = this.#generateTraffic();
 		this.#cars = this.#generateCars();
@@ -572,7 +636,10 @@ export default class Main {
 		if (document.body.dataset.view === 'network') {
 			document.getElementById('view-legend-secondary').textContent = `${this.#activeSensors.length} INPUTS → 6 HIDDEN → 4 OUTPUTS`;
 		}
-		this.#bestCar.sensor?.update(this.#street.borders, this.#traffic);
+		this.#bestCar.sensor?.update(
+			this.#street.bordersNear(this.#bestCar.y, this.#maxSensorReach + 100),
+			this.#nearbyTrafficFor(this.#bestCar)
+		);
 		this.#ui.status.textContent = status ?? (this.#championBrain ? `EVOLVING SAVED CHAMPION · ${this.#difficulty.label}` : 'SEARCHING FROM RANDOM');
 		this.#renderGarage();
 	}
@@ -811,12 +878,16 @@ export default class Main {
 
 	#simulateTick() {
 		for (const obstacle of this.#traffic) {
-			this.#steerTraffic(obstacle);
-			obstacle.update(this.#street.borders, []);
+			this.#advanceTraffic(obstacle);
 		}
 		for (const car of this.#cars) {
-			car.update(this.#street.borders, this.#traffic);
-			this.#recordMetrics(car);
+			if (car.damaged) continue;
+			const nearbyTraffic = this.#nearbyTrafficFor(car);
+			car.update(
+				this.#street.bordersNear(car.y, this.#maxSensorReach + 100),
+				nearbyTraffic
+			);
+			this.#recordMetrics(car, nearbyTraffic);
 		}
 		this.#generationTick += 1;
 		this.#selectBest();
@@ -839,16 +910,22 @@ export default class Main {
 
 		this.#ctx.save();
 		this.#ctx.translate(0, -this.#bestCar.y + this.#height * 0.62);
-		this.#street.draw(this.#ctx);
-		for (const obstacle of this.#traffic) obstacle.draw(this.#ctx, false);
+		const visibleTop = this.#bestCar.y - this.#height * 0.7;
+		const visibleBottom = this.#bestCar.y + this.#height * 0.5;
+		this.#street.draw(this.#ctx, visibleTop - 180, visibleBottom + 180);
+		for (const obstacle of this.#traffic) {
+			if (obstacle.y >= visibleTop - 120 && obstacle.y <= visibleBottom + 120) obstacle.draw(this.#ctx, false);
+		}
 
 		this.#ctx.globalAlpha = 0.16;
-		for (const car of this.#cars) car.draw(this.#ctx, false);
+		for (const car of this.#cars) {
+			if (car.y >= visibleTop - 120 && car.y <= visibleBottom + 120) car.draw(this.#ctx, false);
+		}
 		this.#ctx.globalAlpha = 1;
 		this.#bestCar.draw(this.#ctx, true, true);
 		this.#ctx.restore();
 
-		if (document.body.dataset.view !== 'fitness') {
+		if (document.body.dataset.view === 'drive' || document.body.dataset.view === 'network') {
 			if (!NeuralNetwork.isValid(this.#bestCar.brain)) throw new Error('Champion brain schema is invalid.');
 			this.#netCtx.lineDashOffset = -time / 60;
 			Visualizer.drawNetwork(this.#netCtx, this.#bestCar.brain);
@@ -898,6 +975,10 @@ export default class Main {
 		dashboard.passes.textContent = String(snapshot.passes);
 		dashboard.window.textContent = `${Math.round(this.#generationLimit / TICKS_PER_SECOND)} S${this.#smartExtensions ? ` · +${this.#smartExtensions}` : ''}`;
 		dashboard.difficulty.textContent = this.#difficulty.label;
+		const nextDifficulty = this.#nextDifficulty();
+		dashboard.nextUnlock.textContent = nextDifficulty
+			? `${nextDifficulty.unlockLabel} · ${nextDifficulty.milestone >= 10000 ? `${Math.round(nextDifficulty.milestone / 1000)}K` : `${(nextDifficulty.milestone / 1000).toFixed(1)}K`}`
+			: 'MAX TIER';
 		dashboard.seed.textContent = this.#trafficSeed.toString(16).toUpperCase().padStart(8, '0').slice(-8);
 		dashboard.progressReward.textContent = signed(breakdown.progress);
 		dashboard.paceReward.textContent = signed(breakdown.pace);
