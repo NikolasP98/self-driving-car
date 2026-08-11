@@ -1,12 +1,18 @@
-import { lerp, getIntersection } from './utils';
+import { getIntersection } from './utils';
+
+export const DEFAULT_SENSOR_CONFIG = Object.freeze([
+	{ id: 'ray-left-wide', angle: 45, length: 200 },
+	{ id: 'ray-left', angle: 22.5, length: 200 },
+	{ id: 'ray-center', angle: 0, length: 200 },
+	{ id: 'ray-right', angle: -22.5, length: 200 },
+	{ id: 'ray-right-wide', angle: -45, length: 200 },
+]);
 
 export default class Sensor {
-	constructor(car) {
+	constructor(car, configuration = DEFAULT_SENSOR_CONFIG) {
 		this.car = car;
-
-		this.rayCount = 5;
-		this.rayLength = 200;
-		this.raySpread = Math.PI / 2;
+		this.configuration = configuration.map((ray) => ({ ...ray }));
+		this.rayCount = this.configuration.length;
 
 		this.rays = [];
 		this.readings = [];
@@ -55,17 +61,13 @@ export default class Sensor {
 	#castRays() {
 		this.rays = [];
 		for (let i = 0; i < this.rayCount; i++) {
-			const rayAngle =
-				lerp(
-					this.raySpread / 2,
-					-this.raySpread / 2,
-					this.rayCount == 1 ? 0.5 : i / (this.rayCount - 1)
-				) + this.car.angle;
+			const configuration = this.configuration[i];
+			const rayAngle = (configuration.angle * Math.PI) / 180 + this.car.angle;
 
 			const startPoint = { x: this.car.x, y: this.car.y };
 			const endPoint = {
-				x: this.car.x - Math.sin(rayAngle) * this.rayLength,
-				y: this.car.y - Math.cos(rayAngle) * this.rayLength,
+				x: this.car.x - Math.sin(rayAngle) * configuration.length,
+				y: this.car.y - Math.cos(rayAngle) * configuration.length,
 			};
 
 			this.rays.push([startPoint, endPoint]);

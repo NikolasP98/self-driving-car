@@ -1,5 +1,6 @@
 import Car from './classes/car';
 import NeuralNetwork from './classes/network';
+import { DEFAULT_SENSOR_CONFIG } from './classes/sensor';
 import Street from './classes/street';
 import Visualizer from './classes/visualizer';
 
@@ -15,7 +16,25 @@ const DURATION_TICKS = {
 const SMART_EXTENSION_TICKS = 15 * TICKS_PER_SECOND;
 const SMART_MAX_TICKS = 60 * TICKS_PER_SECOND;
 const MIN_GENERATION_TICKS = 240;
-const MAX_SAMPLES = 80;
+const MAX_SAMPLES = 120;
+const MAX_PAST_RUNS = 4;
+const LAB_STATE_KEY = 'pinoniteNeuralLabV2';
+const LAB_STATE_VERSION = 2;
+const REWARD_DEFAULTS = Object.freeze({
+	progress: 1,
+	pace: 190,
+	passing: 260,
+	tailing: 0.16,
+	idle: 0.12,
+	collision: 900,
+});
+const DIFFICULTIES = Object.freeze([
+	{ label: 'STRAIGHT / STATIC', curveAmplitude: 0, laneChanges: false, milestone: 0 },
+	{ label: 'CURVED ROAD', curveAmplitude: 58, laneChanges: false, milestone: 2200 },
+	{ label: 'CURVES + LANE CHANGES', curveAmplitude: 72, laneChanges: true, milestone: 4500 },
+]);
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const cloneSensors = (sensors) => sensors.map((sensor) => ({ ...sensor }));
 
 const cloneBrain = (brain) => JSON.parse(JSON.stringify(brain));
 const signed = (value, sign = '+') => `${sign}${Math.round(Math.max(0, value))}`;
@@ -86,8 +105,13 @@ export default class Main {
 	#street;
 	#bestCar;
 	#traffic = [];
+	#trafficStates = new Map();
 	#metrics = new Map();
 	#championBrain = null;
+	#championFitness = 0;
+	#difficulty = DIFFICULTIES[0];
+	#activeSensors = cloneSensors(DEFAULT_SENSOR_CONFIG);
+	#pendingSensors = cloneSensors(DEFAULT_SENSOR_CONFIG);
 	#generation = 0;
 	#generationTick = 0;
 	#generationLimit = DURATION_TICKS.smart;
@@ -97,9 +121,9 @@ export default class Main {
 	#running = false;
 	#recoveries = 0;
 	#stableFrames = 0;
-	#sampleIndex = 0;
 	#lastSampleKey = '';
-	#series = { fitness: [], average: [], survival: [], pace: [] };
+	#currentSeries = { fitness: [], average: [], survival: [], pace: [] };
+	#pastRuns = [];
 	#settings = {
 		speed: 2,
 		duration: 'smart',
@@ -109,6 +133,7 @@ export default class Main {
 		traffic: 'standard',
 		population: 120,
 		autoEvolve: true,
+		rewards: { ...REWARD_DEFAULTS },
 	};
 	#ui;
 
@@ -134,6 +159,7 @@ export default class Main {
 				pace: document.getElementById('dashboard-pace'),
 				passes: document.getElementById('dashboard-passes'),
 				window: document.getElementById('dashboard-window'),
+				difficulty: document.getElementById('dashboard-difficulty'),
 				seed: document.getElementById('dashboard-seed'),
 				progressReward: document.getElementById('reward-progress'),
 				paceReward: document.getElementById('reward-pace'),
@@ -145,22 +171,22 @@ export default class Main {
 					fitness: {
 						value: document.getElementById('fitness-chart-value'),
 						line: document.getElementById('fitness-chart-line'),
-						area: document.getElementById('fitness-chart-area'),
+						history: document.getElementById('fitness-chart-history'),
 					},
 					average: {
 						value: document.getElementById('average-chart-value'),
 						line: document.getElementById('average-chart-line'),
-						area: document.getElementById('average-chart-area'),
+						history: document.getElementById('average-chart-history'),
 					},
 					survival: {
 						value: document.getElementById('survival-chart-value'),
 						line: document.getElementById('survival-chart-line'),
-						area: document.getElementById('survival-chart-area'),
+						history: document.getElementById('survival-chart-history'),
 					},
 					pace: {
 						value: document.getElementById('pace-chart-value'),
 						line: document.getElementById('pace-chart-line'),
-						area: document.getElementById('pace-chart-area'),
+						history: document.getElementById('pace-chart-history'),
 					},
 				},
 			},
@@ -170,9 +196,10 @@ export default class Main {
 	#generateCars() {
 		return Array.from(
 			{ length: this.#settings.population },
-			() => new Car(this.#street.getCenterLane(1), START_Y, 50, 80, 'AI', {
+			() => new Car(this.#street.getCenterLane(1, START_Y), START_Y, 50, 80, 'AI', {
 				maxSpeed: this.#settings.pace,
 				accelerationFactor: this.#settings.acceleration,
+				sensors: this.#activeSensors,
 			})
 		);
 	}
@@ -186,36 +213,77 @@ export default class Main {
 		const profile = profiles[this.#settings.traffic] ?? profiles.standard;
 		const random = seededRandom(this.#trafficSeed);
 		const traffic = [];
+		this.#trafficStates = new Map();
 
 		for (let row = 0; row < profile.rows; row++) {
 			const firstLane = Math.floor(random() * this.#street.laneCount);
 			const secondLane = (firstLane + 1 + Math.floor(random() * 2)) % this.#street.laneCount;
 			const y = -620 - row * profile.gap - random() * profile.gap * 0.32;
-			traffic.push(
-				new Car(this.#street.getCenterLane(firstLane), y, 50, 80, 'DUMMY', {
+			const firstCar = new Car(this.#street.getCenterLane(firstLane, y), y, 50, 80, 'DUMMY', {
 					maxSpeed: 1.9 + random() * 0.28,
-				})
-			);
+				});
+			traffic.push(firstCar);
+			this.#trafficStates.set(firstCar, {
+				lane: firstLane,
+				targetLane: firstLane,
+				nextChangeTick: 220 + Math.floor(random() * 900),
+				random,
+			});
 
 			if (random() < profile.secondCarChance) {
-				traffic.push(
-					new Car(this.#street.getCenterLane(secondLane), y - 120 - random() * 130, 50, 80, 'DUMMY', {
+				const secondY = y - 120 - random() * 130;
+				const secondCar = new Car(this.#street.getCenterLane(secondLane, secondY), secondY, 50, 80, 'DUMMY', {
 						maxSpeed: 1.85 + random() * 0.28,
-					})
-				);
+					});
+				traffic.push(secondCar);
+				this.#trafficStates.set(secondCar, {
+					lane: secondLane,
+					targetLane: secondLane,
+					nextChangeTick: 220 + Math.floor(random() * 900),
+					random,
+				});
 			}
 		}
 
 		return traffic;
 	}
 
+	#difficultyFor(fitness = this.#championFitness) {
+		return [...DIFFICULTIES].reverse().find((tier) => fitness >= tier.milestone) ?? DIFFICULTIES[0];
+	}
+
+	#createStreet() {
+		const curvePhase = (this.#trafficSeed % 10000) - 5000;
+		return new Street(this.#width / 2, this.#roadWidth(), 3, {
+			curveAmplitude: this.#difficulty.curveAmplitude,
+			curvePhase,
+		});
+	}
+
+	#steerTraffic(obstacle) {
+		const state = this.#trafficStates.get(obstacle);
+		if (!state || obstacle.damaged) return;
+		if (this.#difficulty.laneChanges && this.#generationTick >= state.nextChangeTick) {
+			const direction = state.random() < 0.5 ? -1 : 1;
+			state.targetLane = Math.max(0, Math.min(this.#street.laneCount - 1, state.lane + direction));
+			state.nextChangeTick = this.#generationTick + 360 + Math.floor(state.random() * 780);
+		}
+
+		const lookAheadY = obstacle.y - 150;
+		const targetX = this.#street.getCenterLane(state.targetLane, lookAheadY);
+		const error = targetX - obstacle.x;
+		obstacle.controls.left = error < -5;
+		obstacle.controls.right = error > 5;
+		if (Math.abs(error) < 11) state.lane = state.targetLane;
+	}
+
 	#metricFor(car) {
 		return this.#metrics.get(car);
 	}
 
-	#laneIndexFor(x) {
+	#laneIndexFor(x, y) {
 		const laneWidth = this.#street.width / this.#street.laneCount;
-		return Math.max(0, Math.min(this.#street.laneCount - 1, Math.floor((x - this.#street.left) / laneWidth)));
+		return Math.max(0, Math.min(this.#street.laneCount - 1, Math.floor((x - this.#street.leftAt(y)) / laneWidth)));
 	}
 
 	#scoreBreakdown(car) {
@@ -224,14 +292,15 @@ export default class Main {
 			return { progress: 0, pace: 0, passing: 0, tailing: 0, idle: 0, collision: 0, total: Number.NEGATIVE_INFINITY, averageSpeed: 0 };
 		}
 
-		const progress = Math.max(0, START_Y - car.y);
+		const rewards = this.#settings.rewards;
+		const progress = Math.max(0, START_Y - car.y) * rewards.progress;
 		const averageSpeed = metric.ticks ? metric.speedTotal / metric.ticks : 0;
 		const paceRatio = Math.min(1.15, Math.max(0, averageSpeed) / this.#settings.pace);
-		const pace = paceRatio * 190;
-		const passing = metric.passes * 260;
-		const tailing = metric.followingTicks * 0.16;
-		const idle = metric.idleTicks * 0.12;
-		const collision = car.damaged ? 900 : 0;
+		const pace = paceRatio * rewards.pace;
+		const passing = metric.passes * rewards.passing;
+		const tailing = metric.followingTicks * rewards.tailing;
+		const idle = metric.idleTicks * rewards.idle;
+		const collision = car.damaged ? rewards.collision : 0;
 
 		return {
 			progress,
@@ -256,7 +325,7 @@ export default class Main {
 		metric.ticks += 1;
 		metric.speedTotal += Math.max(0, car.speed);
 		if (car.speed < this.#settings.pace * 0.52) metric.idleTicks += 1;
-		const laneIndex = this.#laneIndexFor(car.x);
+		const laneIndex = this.#laneIndexFor(car.x, car.y);
 		if (laneIndex !== metric.lastLane) {
 			metric.lastLane = laneIndex;
 			metric.laneChanges += 1;
@@ -328,11 +397,138 @@ export default class Main {
 		return true;
 	}
 
-	#startGeneration({ keepElite = true, status = null } = {}) {
-		if (keepElite && NeuralNetwork.isValid(this.#bestCar?.brain)) {
-			this.#championBrain = cloneBrain(this.#bestCar.brain);
+	#emptySeries() {
+		return { fitness: [], average: [], survival: [], pace: [] };
+	}
+
+	#validSeries(series) {
+		if (!series || typeof series !== 'object') return this.#emptySeries();
+		return Object.fromEntries(
+			Object.keys(this.#emptySeries()).map((key) => [
+				key,
+				Array.isArray(series[key])
+					? series[key].filter(Number.isFinite).slice(-MAX_SAMPLES)
+					: [],
+			])
+		);
+	}
+
+	#safeRewards(rewards) {
+		const clean = { ...REWARD_DEFAULTS };
+		for (const key of Object.keys(clean)) {
+			const value = Number(rewards?.[key]);
+			if (Number.isFinite(value) && value >= 0) clean[key] = value;
 		}
-		if (!NeuralNetwork.isValid(this.#championBrain)) this.#championBrain = null;
+		return clean;
+	}
+
+	#safeSensors(sensors) {
+		if (!Array.isArray(sensors)) return cloneSensors(DEFAULT_SENSOR_CONFIG);
+		const seen = new Set();
+		const clean = sensors.slice(0, 12).flatMap((sensor) => {
+			const id = String(sensor?.id || '');
+			const angle = Number(sensor?.angle);
+			const length = Number(sensor?.length);
+			if (!id || seen.has(id) || !Number.isFinite(angle) || !Number.isFinite(length)) return [];
+			seen.add(id);
+			return [{ id, angle: Math.max(-80, Math.min(80, angle)), length: Math.max(80, Math.min(360, length)) }];
+		});
+		return clean.length ? clean : cloneSensors(DEFAULT_SENSOR_CONFIG);
+	}
+
+	#sensorsChanged() {
+		return JSON.stringify(this.#activeSensors) !== JSON.stringify(this.#pendingSensors);
+	}
+
+	#loadLabState() {
+		let parsed = null;
+		try {
+			parsed = JSON.parse(localStorage.getItem(LAB_STATE_KEY) || 'null');
+		} catch (error) {
+			console.warn('Training state could not be parsed.', error);
+		}
+
+		const legacy = this.#loadSavedBrain();
+		const stateBrain = parsed?.version === LAB_STATE_VERSION && NeuralNetwork.isValid(parsed.champion)
+			? parsed.champion
+			: legacy.brain;
+		const runs = Array.isArray(parsed?.completedRuns)
+			? parsed.completedRuns.slice(-MAX_PAST_RUNS).map((run) => ({
+				generation: Number(run.generation) || 0,
+				seed: Number(run.seed) || 0,
+				difficulty: String(run.difficulty || DIFFICULTIES[0].label),
+				score: Math.max(0, Number(run.score) || 0),
+				series: this.#validSeries(run.series),
+			}))
+			: [];
+
+		return {
+			brain: stateBrain,
+			championFitness: Math.max(0, Number(parsed?.championFitness) || 0),
+			completedRuns: runs,
+			rewards: this.#safeRewards(parsed?.rewards),
+			activeSensors: this.#safeSensors(parsed?.activeSensors),
+			pendingSensors: this.#safeSensors(parsed?.pendingSensors ?? parsed?.activeSensors),
+			status: legacy.status,
+		};
+	}
+
+	#persistLabState() {
+		try {
+			const state = {
+				version: LAB_STATE_VERSION,
+				champion: NeuralNetwork.isValid(this.#championBrain) ? this.#championBrain : null,
+				championFitness: this.#championFitness,
+				completedRuns: this.#pastRuns.slice(-MAX_PAST_RUNS),
+				rewards: this.#settings.rewards,
+				activeSensors: this.#activeSensors,
+				pendingSensors: this.#pendingSensors,
+			};
+			localStorage.setItem(LAB_STATE_KEY, JSON.stringify(state));
+			if (state.champion) localStorage.setItem('bestBrain', JSON.stringify(state.champion));
+			else localStorage.removeItem('bestBrain');
+			return true;
+		} catch (error) {
+			console.warn('Training state could not be persisted.', error);
+			this.#ui.status.textContent = 'LOCAL SAVE FULL · RUN CONTINUES';
+			return false;
+		}
+	}
+
+	#completeGeneration({ forceChampion = false } = {}) {
+		if (!this.#bestCar || this.#generationTick < 1) return;
+		const score = Math.max(0, this.#score(this.#bestCar));
+		this.#pastRuns.push({
+			generation: this.#generation,
+			seed: this.#trafficSeed,
+			difficulty: this.#difficulty.label,
+			score,
+			series: this.#validSeries(this.#currentSeries),
+		});
+		this.#pastRuns = this.#pastRuns.slice(-MAX_PAST_RUNS);
+
+		if ((forceChampion || score >= this.#championFitness) && NeuralNetwork.isValid(this.#bestCar.brain)) {
+			this.#championBrain = cloneBrain(this.#bestCar.brain);
+			this.#championFitness = score;
+		}
+		this.#persistLabState();
+	}
+
+	#startGeneration({ keepElite = true, status = null } = {}) {
+		if (this.#championBrain && !NeuralNetwork.isValid(this.#championBrain, [this.#activeSensors.length, 6, 4])) {
+			this.#championBrain = null;
+		}
+		if (this.#sensorsChanged()) {
+			if (this.#championBrain) {
+				this.#championBrain = NeuralNetwork.reconcileInputs(
+					this.#championBrain,
+					this.#activeSensors.map((sensor) => sensor.id),
+					this.#pendingSensors.map((sensor) => sensor.id)
+				);
+			}
+			this.#activeSensors = cloneSensors(this.#pendingSensors);
+			this.#persistLabState();
+		}
 
 		this.#generation += 1;
 		this.#generationTick = 0;
@@ -340,6 +536,9 @@ export default class Main {
 		this.#smartExtensions = 0;
 		this.#trafficSeed = randomSeed();
 		this.#lastSampleKey = '';
+		this.#currentSeries = this.#emptySeries();
+		this.#difficulty = this.#difficultyFor();
+		this.#street = this.#createStreet();
 		this.#traffic = this.#generateTraffic();
 		this.#cars = this.#generateCars();
 		this.#metrics = new Map(
@@ -369,8 +568,13 @@ export default class Main {
 		}
 
 		this.#bestCar = this.#cars[0];
+		document.body.dataset.sensorCount = String(this.#activeSensors.length);
+		if (document.body.dataset.view === 'network') {
+			document.getElementById('view-legend-secondary').textContent = `${this.#activeSensors.length} INPUTS → 6 HIDDEN → 4 OUTPUTS`;
+		}
 		this.#bestCar.sensor?.update(this.#street.borders, this.#traffic);
-		this.#ui.status.textContent = status ?? (this.#championBrain ? 'EVOLVING ELITE' : 'SEARCHING FROM RANDOM');
+		this.#ui.status.textContent = status ?? (this.#championBrain ? `EVOLVING SAVED CHAMPION · ${this.#difficulty.label}` : 'SEARCHING FROM RANDOM');
+		this.#renderGarage();
 	}
 
 	#loadSavedBrain() {
@@ -387,12 +591,16 @@ export default class Main {
 	}
 
 	#resetPopulation = () => {
-		const saved = this.#loadSavedBrain();
+		const saved = this.#loadLabState();
 		this.#championBrain = saved.brain;
+		this.#championFitness = saved.championFitness;
+		this.#pastRuns = saved.completedRuns;
+		this.#settings.rewards = saved.rewards;
+		this.#activeSensors = saved.activeSensors;
+		this.#pendingSensors = saved.pendingSensors;
+		this.#syncRewardInputs();
 		this.#generation = 0;
 		this.#bestCar = null;
-		this.#series = { fitness: [], average: [], survival: [], pace: [] };
-		this.#sampleIndex = 0;
 		this.#startGeneration({ keepElite: false, status: saved.status });
 		if (!this.#running) {
 			this.#running = true;
@@ -401,20 +609,146 @@ export default class Main {
 	};
 
 	#nextGeneration = () => {
+		this.#completeGeneration();
 		this.#startGeneration({ keepElite: true });
 	};
 
-	#save = () => {
-		if (!NeuralNetwork.isValid(this.#bestCar?.brain)) return;
-		localStorage.setItem('bestBrain', JSON.stringify(this.#bestCar.brain));
-		this.#championBrain = cloneBrain(this.#bestCar.brain);
-		this.#ui.status.textContent = 'CHAMPION SAVED LOCALLY';
-	};
+	#syncRewardInputs() {
+		for (const [key, value] of Object.entries(this.#settings.rewards)) {
+			const input = document.getElementById(`weight-${key}`);
+			if (input) input.value = String(value);
+		}
+	}
 
-	#discard = () => {
-		localStorage.removeItem('bestBrain');
-		this.#ui.status.textContent = 'SAVED CHAMPION DISCARDED';
-	};
+	#bindRewards() {
+		const keys = Object.keys(REWARD_DEFAULTS);
+		for (const key of keys) {
+			const input = document.getElementById(`weight-${key}`);
+			input.addEventListener('change', () => {
+				const value = Number(input.value);
+				this.#settings.rewards[key] = Number.isFinite(value) && value >= 0 ? value : REWARD_DEFAULTS[key];
+				input.value = String(this.#settings.rewards[key]);
+				this.#persistLabState();
+				this.#ui.status.textContent = 'FITNESS WEIGHTS UPDATED';
+			});
+		}
+		document.getElementById('reset-rewards').onclick = () => {
+			this.#settings.rewards = { ...REWARD_DEFAULTS };
+			this.#syncRewardInputs();
+			this.#persistLabState();
+			this.#ui.status.textContent = 'FITNESS WEIGHTS RESET';
+		};
+	}
+
+	#stageSensorChange(mutator) {
+		const next = cloneSensors(this.#pendingSensors);
+		mutator(next);
+		this.#pendingSensors = this.#safeSensors(next);
+		this.#persistLabState();
+		this.#renderGarage();
+		this.#ui.status.textContent = 'SENSOR EDITS QUEUED · NEXT GENERATION';
+	}
+
+	#renderGarage() {
+		const rows = document.getElementById('sensor-rows');
+		const rays = document.getElementById('sensor-preview-rays');
+		if (!rows || !rays) return;
+		rows.replaceChildren();
+		rays.replaceChildren();
+		const changed = this.#sensorsChanged();
+		document.getElementById('garage-status').textContent = changed ? 'CHANGES PENDING · NEXT RUN' : 'CURRENT CONFIGURATION';
+		document.getElementById('sensor-count').textContent = `${this.#pendingSensors.length} INPUT NODE${this.#pendingSensors.length === 1 ? '' : 'S'}`;
+
+		this.#pendingSensors.forEach((sensor, index) => {
+			const row = document.createElement('div');
+			row.className = 'sensor-row';
+			const name = document.createElement('strong');
+			name.textContent = `R${String(index + 1).padStart(2, '0')} · ${sensor.id.startsWith('ray-new') ? 'NEWBORN' : 'WEIGHTED'}`;
+
+			const createRange = (property, min, max, step, suffix) => {
+				const label = document.createElement('label');
+				const input = document.createElement('input');
+				input.type = 'range';
+				input.min = String(min);
+				input.max = String(max);
+				input.step = String(step);
+				input.value = String(sensor[property]);
+				input.setAttribute('aria-label', `${property} for sensor ${index + 1}`);
+				const output = document.createElement('output');
+				output.textContent = `${Number(sensor[property]).toFixed(property === 'angle' ? 0 : 0)}${suffix}`;
+				input.oninput = () => {
+					const value = Number(input.value);
+					output.textContent = `${value.toFixed(0)}${suffix}`;
+					this.#pendingSensors[index][property] = value;
+					this.#persistLabState();
+					this.#drawSensorPreview();
+					document.getElementById('garage-status').textContent = 'CHANGES PENDING · NEXT RUN';
+				};
+				label.append(input, output);
+				return label;
+			};
+
+			const remove = document.createElement('button');
+			remove.type = 'button';
+			remove.textContent = '×';
+			remove.title = 'Delete this sensor';
+			remove.disabled = this.#pendingSensors.length <= 1;
+			remove.onclick = () => this.#stageSensorChange((sensors) => sensors.splice(index, 1));
+			row.append(name, createRange('angle', -80, 80, 1, '°'), createRange('length', 80, 360, 10, ''), remove);
+			rows.append(row);
+		});
+		this.#drawSensorPreview();
+	}
+
+	#drawSensorPreview() {
+		const rays = document.getElementById('sensor-preview-rays');
+		if (!rays) return;
+		rays.replaceChildren();
+		const origin = { x: 210, y: 260 };
+		this.#pendingSensors.forEach((sensor, index) => {
+			const angle = (sensor.angle * Math.PI) / 180;
+			const scaledLength = sensor.length * 0.62;
+			const end = { x: origin.x - Math.sin(angle) * scaledLength, y: origin.y - Math.cos(angle) * scaledLength };
+			const line = document.createElementNS(SVG_NS, 'line');
+			line.setAttribute('class', 'sensor-ray');
+			line.setAttribute('x1', origin.x);
+			line.setAttribute('y1', origin.y);
+			line.setAttribute('x2', end.x);
+			line.setAttribute('y2', end.y);
+			const dot = document.createElementNS(SVG_NS, 'circle');
+			dot.setAttribute('class', 'sensor-ray-end');
+			dot.setAttribute('cx', end.x);
+			dot.setAttribute('cy', end.y);
+			dot.setAttribute('r', 4);
+			const label = document.createElementNS(SVG_NS, 'text');
+			label.setAttribute('class', 'sensor-ray-label');
+			label.setAttribute('x', end.x + 7);
+			label.setAttribute('y', end.y + 3);
+			label.textContent = `R${index + 1}`;
+			rays.append(line, dot, label);
+		});
+	}
+
+	#bindGarage() {
+		document.getElementById('add-sensor').onclick = () => {
+			if (this.#pendingSensors.length >= 12) {
+				this.#ui.status.textContent = 'SENSOR LIMIT · 12 INPUTS';
+				return;
+			}
+			this.#stageSensorChange((sensors) => sensors.push({
+				id: `ray-new-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+				angle: 0,
+				length: 200,
+			}));
+		};
+		document.getElementById('reset-sensors').onclick = () => {
+			this.#pendingSensors = cloneSensors(DEFAULT_SENSOR_CONFIG);
+			this.#persistLabState();
+			this.#renderGarage();
+			this.#ui.status.textContent = 'FIVE-RAY ARRAY QUEUED · NEXT GENERATION';
+		};
+		this.#renderGarage();
+	}
 
 	#bindControls() {
 		const speed = document.getElementById('sim-speed');
@@ -471,12 +805,15 @@ export default class Main {
 
 		document.getElementById('next-generation').onclick = this.#nextGeneration;
 		document.getElementById('reset-run').onclick = this.#resetPopulation;
-		document.getElementById('save-brain').onclick = this.#save;
-		document.getElementById('delete-brain').onclick = this.#discard;
+		this.#bindRewards();
+		this.#bindGarage();
 	}
 
 	#simulateTick() {
-		for (const obstacle of this.#traffic) obstacle.update(this.#street.borders, []);
+		for (const obstacle of this.#traffic) {
+			this.#steerTraffic(obstacle);
+			obstacle.update(this.#street.borders, []);
+		}
 		for (const car of this.#cars) {
 			car.update(this.#street.borders, this.#traffic);
 			this.#recordMetrics(car);
@@ -532,10 +869,22 @@ export default class Main {
 		};
 	}
 
-	#renderChart(chart, values, bounds) {
-		const path = chartPath(values, bounds);
-		chart.line.setAttribute('d', path.line);
-		chart.area.setAttribute('d', path.area);
+	#renderChart(chart, metric, bounds) {
+		const values = this.#currentSeries[metric];
+		const histories = this.#pastRuns.map((run) => run.series[metric]).filter((series) => series.length);
+		const combined = [...histories.flat(), ...values];
+		const sharedBounds = bounds ?? {
+			min: Math.min(0, ...combined),
+			max: Math.max(1, ...combined),
+		};
+		chart.history.replaceChildren();
+		histories.forEach((series, index) => {
+			const path = document.createElementNS(SVG_NS, 'path');
+			path.setAttribute('d', chartPath(series, sharedBounds).area);
+			path.setAttribute('opacity', String(0.055 + ((index + 1) / histories.length) * 0.17));
+			chart.history.append(path);
+		});
+		chart.line.setAttribute('d', chartPath(values, sharedBounds).line);
 	}
 
 	#updateDashboard(snapshot) {
@@ -548,6 +897,7 @@ export default class Main {
 		dashboard.pace.textContent = `${breakdown.averageSpeed.toFixed(1)} / ${this.#settings.pace.toFixed(1)}`;
 		dashboard.passes.textContent = String(snapshot.passes);
 		dashboard.window.textContent = `${Math.round(this.#generationLimit / TICKS_PER_SECOND)} S${this.#smartExtensions ? ` · +${this.#smartExtensions}` : ''}`;
+		dashboard.difficulty.textContent = this.#difficulty.label;
 		dashboard.seed.textContent = this.#trafficSeed.toString(16).toUpperCase().padStart(8, '0').slice(-8);
 		dashboard.progressReward.textContent = signed(breakdown.progress);
 		dashboard.paceReward.textContent = signed(breakdown.pace);
@@ -559,21 +909,20 @@ export default class Main {
 		const sampleKey = `${this.#generation}:${Math.floor(this.#generationTick / 30)}`;
 		if (sampleKey !== this.#lastSampleKey) {
 			this.#lastSampleKey = sampleKey;
-			this.#sampleIndex += 1;
-			this.#series.fitness.push(Math.max(0, breakdown.total));
-			this.#series.average.push(snapshot.average);
-			this.#series.survival.push(snapshot.alivePercent);
-			this.#series.pace.push(breakdown.averageSpeed);
-			for (const values of Object.values(this.#series)) {
+			this.#currentSeries.fitness.push(Math.max(0, breakdown.total));
+			this.#currentSeries.average.push(snapshot.average);
+			this.#currentSeries.survival.push(snapshot.alivePercent);
+			this.#currentSeries.pace.push(breakdown.averageSpeed);
+			for (const values of Object.values(this.#currentSeries)) {
 				if (values.length > MAX_SAMPLES) values.shift();
 			}
 
-			this.#renderChart(dashboard.charts.fitness, this.#series.fitness);
-			this.#renderChart(dashboard.charts.average, this.#series.average);
-			this.#renderChart(dashboard.charts.survival, this.#series.survival, { min: 0, max: 100 });
-			this.#renderChart(dashboard.charts.pace, this.#series.pace, { min: 0, max: this.#settings.pace * 1.1 });
+			this.#renderChart(dashboard.charts.fitness, 'fitness');
+			this.#renderChart(dashboard.charts.average, 'average');
+			this.#renderChart(dashboard.charts.survival, 'survival', { min: 0, max: 100 });
+			this.#renderChart(dashboard.charts.pace, 'pace', { min: 0, max: this.#settings.pace * 1.1 });
 		}
-		dashboard.sample.textContent = String(this.#sampleIndex).padStart(3, '0');
+		dashboard.sample.textContent = String(this.#currentSeries.fitness.length).padStart(3, '0');
 
 		dashboard.charts.fitness.value.textContent = String(Math.max(0, Math.round(breakdown.total)));
 		dashboard.charts.average.value.textContent = String(Math.round(snapshot.average));
@@ -595,7 +944,11 @@ export default class Main {
 		console.error('Neural-car runtime recovered from an invalid frame.', error);
 		this.#recoveries += 1;
 		this.#stableFrames = 0;
-		if (!NeuralNetwork.isValid(this.#bestCar?.brain)) localStorage.removeItem('bestBrain');
+		if (!NeuralNetwork.isValid(this.#bestCar?.brain)) {
+			this.#championBrain = null;
+			this.#championFitness = 0;
+			this.#persistLabState();
+		}
 		this.#championBrain = null;
 
 		if (this.#recoveries > 2) {
@@ -627,7 +980,7 @@ export default class Main {
 	}
 
 	init = () => {
-		this.#street = new Street(this.#width / 2, this.#roadWidth());
+		this.#street = this.#createStreet();
 		this.#bindControls();
 		this.#running = true;
 		this.#resetPopulation();
@@ -643,7 +996,7 @@ export default class Main {
 		this.#width = width;
 		this.#height = height;
 		this.#netWidth = netWidth;
-		this.#street = new Street(this.#width / 2, this.#roadWidth());
+		this.#street = this.#createStreet();
 	}
 
 	stop() {

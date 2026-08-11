@@ -25,7 +25,7 @@ export default class Car {
 		this.useBrain = controlType == 'AI';
 
 		if (controlType != 'DUMMY') {
-			this.sensor = new Sensor(this);
+			this.sensor = new Sensor(this, options.sensors);
 			this.brain = new NeuralNetwork([this.sensor.rayCount, 6, 4]);
 			this.maxSpeed = options.maxSpeed ?? 2.5;
 			this.color = 'green';

@@ -11,11 +11,12 @@ window.onload = () => {
 	const inspection = document.getElementById('inspection-panel');
 	const legendPrimary = document.getElementById('view-legend-primary');
 	const legendSecondary = document.getElementById('view-legend-secondary');
-	const validViews = new Set(['drive', 'network', 'fitness']);
+	const validViews = new Set(['drive', 'network', 'fitness', 'garage']);
 	const legendCopy = {
 		drive: ['ROAD + FIVE RAYS', 'POLICY RUNNING LIVE'],
 		network: ['LIVE ACTIVATIONS', '5 INPUTS → 6 HIDDEN → 4 OUTPUTS'],
 		fitness: ['COMPOSITE FITNESS', 'PACE + PASSES − PENALTIES'],
+		garage: ['SENSOR ARRAY', 'STAGED FOR NEXT GENERATION'],
 	};
 	const requestedView = new URLSearchParams(window.location.search).get('view');
 
@@ -45,6 +46,10 @@ window.onload = () => {
 		[legendPrimary.textContent, legendSecondary.textContent] = legendCopy[nextView];
 		for (const button of document.querySelectorAll('[data-view-button]')) {
 			button.setAttribute('aria-pressed', String(button.dataset.viewButton === nextView));
+		}
+
+		if (nextView === 'network') {
+			legendSecondary.textContent = `${body.dataset.sensorCount ?? '5'} INPUTS → 6 HIDDEN → 4 OUTPUTS`;
 		}
 
 		if (updateUrl) {

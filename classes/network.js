@@ -16,8 +16,13 @@ export default class NeuralNetwork {
 		return outputs;
 	}
 
-	static isValid(network, neuronCounts = [5, 6, 4]) {
+	static isValid(network, neuronCounts = null) {
 		if (!network || !Array.isArray(network.levels)) return false;
+		if (!neuronCounts) {
+			const inputCount = network.levels[0]?.inputs?.length;
+			if (!Number.isInteger(inputCount) || inputCount < 1 || inputCount > 12) return false;
+			neuronCounts = [inputCount, 6, 4];
+		}
 		if (network.levels.length !== neuronCounts.length - 1) return false;
 
 		return network.levels.every((level, levelIndex) => {
@@ -43,6 +48,21 @@ export default class NeuralNetwork {
 					Array.isArray(row) && row.length === outputCount && row.every(Number.isFinite)
 			);
 		});
+	}
+
+	static reconcileInputs(network, previousIds, nextIds) {
+		if (!NeuralNetwork.isValid(network, [previousIds.length, 6, 4])) {
+			return new NeuralNetwork([nextIds.length, 6, 4]);
+		}
+		const reconciled = JSON.parse(JSON.stringify(network));
+		const firstLevel = reconciled.levels[0];
+		const weightById = new Map(previousIds.map((id, index) => [id, firstLevel.weights[index]]));
+		firstLevel.inputs = new Array(nextIds.length);
+		firstLevel.weights = nextIds.map((id) => {
+			const existing = weightById.get(id);
+			return existing ? [...existing] : firstLevel.outputs.map(() => Math.random() * 2 - 1);
+		});
+		return reconciled;
 	}
 
 	static mutate(network, amount = 1) {

@@ -15,6 +15,7 @@
 				<button type="button" data-view-button="drive" aria-pressed="true">DRIVE</button>
 				<button type="button" data-view-button="network" aria-pressed="false">NETWORK</button>
 				<button type="button" data-view-button="fitness" aria-pressed="false">FITNESS</button>
+				<button type="button" data-view-button="garage" aria-pressed="false">GARAGE</button>
 			</nav>
 			<span id="run-status">EVOLUTIONARY DRIVING · LIVE</span>
 		</header>
@@ -28,6 +29,7 @@
 				<section id="fitness-dashboard" class="fitness-dashboard" aria-label="Live evolutionary fitness dashboard">
 					<header class="training-head">
 						<div><strong>EVOLUTION MONITOR</strong><span>COMPOSITE FITNESS / LIVE</span></div>
+						<div class="trace-key" aria-label="Chart trace legend"><span><i class="current-trace"></i>CURRENT</span><span><i class="past-trace"></i>PAST RUNS</span></div>
 						<p>GEN <output id="dashboard-generation">01</output> · SAMPLE <output id="dashboard-sample">000</output></p>
 					</header>
 
@@ -40,17 +42,18 @@
 							<div><dt>PACE</dt><dd id="dashboard-pace">0.0 / 3.2</dd></div>
 							<div><dt>OVERTAKES</dt><dd id="dashboard-passes">0</dd></div>
 							<div><dt>WINDOW</dt><dd id="dashboard-window">25 S</dd></div>
+							<div><dt>DIFFICULTY</dt><dd id="dashboard-difficulty">STRAIGHT / STATIC</dd></div>
 							<div><dt>TRAFFIC SEED</dt><dd id="dashboard-seed">000000</dd></div>
 						</dl>
 
-						<h2>FITNESS LEDGER</h2>
+						<div class="ledger-heading"><h2>FITNESS LEDGER</h2><button id="reset-rewards" type="button">RESET VALUES</button></div>
 						<ul class="fitness-ledger">
-							<li><span>FORWARD PROGRESS</span><output id="reward-progress">+0</output></li>
-							<li><span>PACE REWARD</span><output id="reward-pace">+0</output></li>
-							<li><span>PASSING BONUS</span><output id="reward-passes">+0</output></li>
-							<li class="penalty"><span>TAILING</span><output id="penalty-tailing">−0</output></li>
-							<li class="penalty"><span>IDLING</span><output id="penalty-idle">−0</output></li>
-							<li class="penalty"><span>COLLISION</span><output id="penalty-collision">−0</output></li>
+							<li><label for="weight-progress">FORWARD / PX</label><input id="weight-progress" type="number" min="0" max="5" step="0.1" value="1" /><output id="reward-progress">+0</output></li>
+							<li><label for="weight-pace">PACE / RUN</label><input id="weight-pace" type="number" min="0" max="1000" step="10" value="190" /><output id="reward-pace">+0</output></li>
+							<li><label for="weight-passing">PASS / CAR</label><input id="weight-passing" type="number" min="0" max="1500" step="10" value="260" /><output id="reward-passes">+0</output></li>
+							<li class="penalty"><label for="weight-tailing">TAIL / TICK</label><input id="weight-tailing" type="number" min="0" max="5" step="0.01" value="0.16" /><output id="penalty-tailing">−0</output></li>
+							<li class="penalty"><label for="weight-idle">IDLE / TICK</label><input id="weight-idle" type="number" min="0" max="5" step="0.01" value="0.12" /><output id="penalty-idle">−0</output></li>
+							<li class="penalty"><label for="weight-collision">COLLISION</label><input id="weight-collision" type="number" min="0" max="5000" step="50" value="900" /><output id="penalty-collision">−0</output></li>
 						</ul>
 					</aside>
 
@@ -59,7 +62,7 @@
 							<header><span>CHAMPION FITNESS</span><output id="fitness-chart-value">0</output></header>
 							<svg viewBox="0 0 320 100" preserveAspectRatio="none" role="img" aria-label="Champion fitness over time">
 								<path class="chart-gridlines" d="M0 25H320M0 50H320M0 75H320M80 0V100M160 0V100M240 0V100" />
-								<path id="fitness-chart-area" class="chart-area" />
+								<g id="fitness-chart-history" class="chart-history"></g>
 								<path id="fitness-chart-line" class="chart-line" />
 							</svg>
 						</article>
@@ -68,7 +71,7 @@
 							<header><span>AVERAGE FITNESS</span><output id="average-chart-value">0</output></header>
 							<svg viewBox="0 0 320 100" preserveAspectRatio="none" role="img" aria-label="Population average fitness over time">
 								<path class="chart-gridlines" d="M0 25H320M0 50H320M0 75H320M80 0V100M160 0V100M240 0V100" />
-								<path id="average-chart-area" class="chart-area" />
+								<g id="average-chart-history" class="chart-history"></g>
 								<path id="average-chart-line" class="chart-line" />
 							</svg>
 						</article>
@@ -77,7 +80,7 @@
 							<header><span>POPULATION ALIVE</span><output id="survival-chart-value">100%</output></header>
 							<svg viewBox="0 0 320 100" preserveAspectRatio="none" role="img" aria-label="Population survival over time">
 								<path class="chart-gridlines" d="M0 25H320M0 50H320M0 75H320M80 0V100M160 0V100M240 0V100" />
-								<path id="survival-chart-area" class="chart-area" />
+								<g id="survival-chart-history" class="chart-history"></g>
 								<path id="survival-chart-line" class="chart-line" />
 							</svg>
 						</article>
@@ -86,10 +89,35 @@
 							<header><span>CHAMPION PACE</span><output id="pace-chart-value">0.0</output></header>
 							<svg viewBox="0 0 320 100" preserveAspectRatio="none" role="img" aria-label="Champion average pace over time">
 								<path class="chart-gridlines" d="M0 25H320M0 50H320M0 75H320M80 0V100M160 0V100M240 0V100" />
-								<path id="pace-chart-area" class="chart-area" />
+								<g id="pace-chart-history" class="chart-history"></g>
 								<path id="pace-chart-line" class="chart-line" />
 							</svg>
 						</article>
+					</div>
+				</section>
+
+				<section id="garage-dashboard" class="garage-dashboard" aria-label="Sensor garage">
+					<header class="garage-head">
+						<div><strong>SENSOR GARAGE</strong><span>EDIT THE NEXT GENERATION'S FIELD OF VIEW</span></div>
+						<span id="garage-status">CURRENT CONFIGURATION</span>
+					</header>
+					<div class="sensor-preview">
+						<svg id="sensor-preview" viewBox="0 0 420 360" role="img" aria-label="Top-down preview of car sensor rays">
+							<path class="garage-grid" d="M0 60H420M0 120H420M0 180H420M0 240H420M0 300H420M60 0V360M120 0V360M180 0V360M240 0V360M300 0V360M360 0V360" />
+							<rect class="garage-car" x="184" y="250" width="52" height="82" rx="4" />
+							<circle class="garage-origin" cx="210" cy="260" r="5" />
+							<g id="sensor-preview-rays"></g>
+						</svg>
+						<p><strong id="sensor-count">5 INPUT NODES</strong><span>Existing ray IDs retain their learned weights. New rays enter with newborn random weights.</span></p>
+					</div>
+					<div class="sensor-editor">
+						<header><span>RAY</span><span>ANGLE</span><span>REACH</span><span></span></header>
+						<div id="sensor-rows"></div>
+						<div class="sensor-actions">
+							<button id="add-sensor" type="button">+ ADD SENSOR</button>
+							<button id="reset-sensors" type="button">RESET FIVE-RAY ARRAY</button>
+						</div>
+						<p>Changes are staged and applied when the next generation begins.</p>
 					</div>
 				</section>
 
@@ -163,8 +191,6 @@
 			<div class="actions">
 				<button id="next-generation" title="Score this run and mutate its champion">NEXT GENERATION ↗</button>
 				<button id="reset-run" title="Restart from the saved champion, or from random networks">RESET RUN</button>
-				<button id="save-brain" title="Save the current fitness champion in this browser">SAVE CHAMPION</button>
-				<button id="delete-brain" title="Discard the locally saved champion">DISCARD SAVED</button>
 			</div>
 		</footer>
 
