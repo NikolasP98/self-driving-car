@@ -612,7 +612,9 @@ body[data-mode='blog'][data-view='fitness'] [data-action='reset'] { display: gri
 	body[data-mode='blog'] .lab-console { grid-template-columns: 1fr; max-height: 38vh; overflow: auto; }
 	body[data-mode='blog'] .tuning { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 	body[data-mode='blog'] .actions { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-columns: auto; }
-	body[data-mode='blog'][data-view='garage'] .garage-dashboard { grid-template-columns: 1fr; }
+	body[data-mode='blog'][data-view='garage'] .garage-dashboard { grid-template-columns: 1fr; grid-template-rows: auto minmax(300px, 1fr) auto; overflow: auto; }
+	body[data-mode='blog'][data-view='garage'] .sensor-preview { grid-row: 2; }
+	body[data-mode='blog'][data-view='garage'] .sensor-editor { grid-row: 3; overflow: visible; }
 	body[data-mode='blog'][data-view='garage'] .sensor-preview { min-height: 300px; }
 	body[data-mode='expanded'][data-view='drive'] #drive-controls-slot .tuning { grid-template-columns: 1fr; }
 	body[data-mode='expanded'][data-view='drive'] .lab-console { grid-template-columns: 1fr; }
