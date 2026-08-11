@@ -463,6 +463,19 @@ input[type='range'] { height: 16px; }
 	min-width: 0;
 }
 
+.promotion-policy {
+	display: grid;
+	align-content: center;
+	gap: 0.35rem;
+	min-width: 0;
+	min-height: 35px;
+	padding: 0.45rem 0.55rem;
+	border-left: 1px solid var(--carbon);
+	border-bottom: 1px solid var(--carbon);
+}
+.promotion-policy span { font: 700 0.48rem/1.1 monospace; letter-spacing: 0.05em; }
+.promotion-policy select { height: 22px; font-size: 0.48rem; }
+
 .actions button {
 	min-width: 0;
 	min-height: 35px;
@@ -477,6 +490,9 @@ input[type='range'] { height: 16px; }
 }
 
 .actions button { border-bottom: 0; }
+#promote-difficulty { border-bottom: 1px solid var(--carbon); }
+.actions button:disabled { background: var(--slip); color: var(--muted); cursor: default; }
+.actions button:disabled:hover { background: var(--slip); color: var(--muted); outline: 0; }
 .actions button:hover,
 .actions button:focus-visible { background: var(--signal); outline: 2px solid var(--cobalt); outline-offset: -3px; }
 #next-generation { background: var(--signal); }
@@ -494,8 +510,10 @@ body[data-view='fitness'] .telemetry { display: none; }
 	body[data-view='fitness'] .stage { grid-template-columns: minmax(250px, 34%) minmax(0, 66%); }
 	body[data-view='garage'] .stage { grid-template-columns: minmax(240px, 32%) minmax(0, 68%); }
 	.lab-console { grid-template-columns: minmax(205px, 0.75fr) minmax(0, 2fr); }
-	.actions { grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	.actions { grid-column: 1 / -1; grid-template-columns: repeat(4, minmax(0, 1fr)); }
 	.actions button { border-top: 1px solid var(--carbon); border-bottom: 0; }
+	#promote-difficulty { border-bottom: 0; }
+	.promotion-policy { border-top: 1px solid var(--carbon); border-bottom: 0; }
 	body[data-view='fitness'] .lab-console { grid-template-columns: minmax(0, 1fr); }
 	body[data-view='fitness'] .actions { grid-column: 1; }
 	.fitness-dashboard { grid-template-columns: minmax(155px, 0.68fr) minmax(0, 2fr); }
@@ -514,6 +532,8 @@ body[data-view='fitness'] .telemetry { display: none; }
 	.tuning { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 	.tuning label { border-bottom: 1px dotted rgb(18 22 19 / 28%); }
 	.actions { grid-column: auto; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	#promote-difficulty { border-bottom: 1px solid var(--carbon); }
+	.promotion-policy { border-bottom: 1px solid var(--carbon); }
 	.legend { display: none; }
 	.fitness-dashboard { grid-template-columns: 1fr; overflow: auto; }
 	.training-head { position: sticky; top: 0; z-index: 2; }

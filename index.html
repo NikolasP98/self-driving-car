@@ -43,6 +43,7 @@
 							<div><dt>OVERTAKES</dt><dd id="dashboard-passes">0</dd></div>
 							<div><dt>WINDOW</dt><dd id="dashboard-window">25 S</dd></div>
 							<div><dt>DIFFICULTY</dt><dd id="dashboard-difficulty">STRAIGHT / TRAFFIC</dd></div>
+							<div><dt>PROMOTION</dt><dd id="dashboard-promotion">SMART / 2 RUNS</dd></div>
 							<div><dt>NEXT UNLOCK</dt><dd id="dashboard-next-unlock">CURVES · 8.5K</dd></div>
 							<div><dt>TRAFFIC SEED</dt><dd id="dashboard-seed">000000</dd></div>
 						</dl>
@@ -190,6 +191,14 @@
 			</div>
 
 			<div class="actions">
+				<label class="promotion-policy">
+					<span>PROMOTION POLICY</span>
+					<select id="promotion-mode">
+						<option value="smart" selected>SMART / CONSISTENT</option>
+						<option value="manual">MANUAL / HOLD</option>
+					</select>
+				</label>
+				<button id="promote-difficulty" type="button" disabled title="Switch to Manual to choose when the course advances">SMART PROMOTION</button>
 				<button id="next-generation" title="Score this run and mutate its champion">NEXT GENERATION ↗</button>
 				<button id="reset-run" title="Restart from the saved champion, or from random networks">RESET RUN</button>
 			</div>

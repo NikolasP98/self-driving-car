@@ -114,6 +114,8 @@ export default class Main {
 	#activeSensors = cloneSensors(DEFAULT_SENSOR_CONFIG);
 	#pendingSensors = cloneSensors(DEFAULT_SENSOR_CONFIG);
 	#maxSensorReach = 200;
+	#smartDifficultyIndex = 0;
+	#manualDifficultyIndex = 0;
 	#generation = 0;
 	#generationTick = 0;
 	#generationLimit = DURATION_TICKS.smart;
@@ -135,6 +137,7 @@ export default class Main {
 		traffic: 'standard',
 		population: 120,
 		autoEvolve: true,
+		promotionMode: 'smart',
 		rewards: { ...REWARD_DEFAULTS },
 	};
 	#ui;
@@ -162,6 +165,7 @@ export default class Main {
 				passes: document.getElementById('dashboard-passes'),
 				window: document.getElementById('dashboard-window'),
 				difficulty: document.getElementById('dashboard-difficulty'),
+				promotion: document.getElementById('dashboard-promotion'),
 				nextUnlock: document.getElementById('dashboard-next-unlock'),
 				seed: document.getElementById('dashboard-seed'),
 				progressReward: document.getElementById('reward-progress'),
@@ -255,13 +259,40 @@ export default class Main {
 		return traffic;
 	}
 
-	#difficultyFor(fitness = this.#championFitness) {
-		return [...DIFFICULTIES].reverse().find((tier) => fitness >= tier.milestone) ?? DIFFICULTIES[0];
+	#difficultyIndexForFitness(fitness = this.#championFitness) {
+		for (let index = DIFFICULTIES.length - 1; index >= 0; index--) {
+			if (fitness >= DIFFICULTIES[index].milestone) return index;
+		}
+		return 0;
+	}
+
+	#safeDifficultyIndex(index, fallback = 0) {
+		const value = Number(index);
+		return Number.isInteger(value) ? Math.max(0, Math.min(DIFFICULTIES.length - 1, value)) : fallback;
+	}
+
+	#difficultyFor() {
+		const index = this.#settings.promotionMode === 'manual'
+			? this.#manualDifficultyIndex
+			: this.#smartDifficultyIndex;
+		return DIFFICULTIES[this.#safeDifficultyIndex(index)];
 	}
 
 	#nextDifficulty() {
 		const index = DIFFICULTIES.indexOf(this.#difficulty);
 		return DIFFICULTIES[index + 1] ?? null;
+	}
+
+	#smartPromotionProgress() {
+		const next = DIFFICULTIES[this.#smartDifficultyIndex + 1];
+		if (!next) return 2;
+		let consecutive = 0;
+		for (let index = this.#pastRuns.length - 1; index >= 0; index--) {
+			if (this.#pastRuns[index].score < next.milestone) break;
+			consecutive += 1;
+			if (consecutive >= 2) break;
+		}
+		return consecutive;
 	}
 
 	#createStreet() {
@@ -524,14 +555,20 @@ export default class Main {
 				series: this.#validSeries(run.series),
 			}))
 			: [];
+		const championFitness = Math.max(0, Number(parsed?.championFitness) || 0);
+		const inferredDifficultyIndex = this.#difficultyIndexForFitness(championFitness);
+		const promotionMode = parsed?.progression?.mode === 'manual' ? 'manual' : 'smart';
 
 		return {
 			brain: stateBrain,
-			championFitness: Math.max(0, Number(parsed?.championFitness) || 0),
+			championFitness,
 			completedRuns: runs,
 			rewards: this.#safeRewards(parsed?.rewards),
 			activeSensors: this.#safeSensors(parsed?.activeSensors),
 			pendingSensors: this.#safeSensors(parsed?.pendingSensors ?? parsed?.activeSensors),
+			promotionMode,
+			smartDifficultyIndex: this.#safeDifficultyIndex(parsed?.progression?.smartDifficultyIndex, inferredDifficultyIndex),
+			manualDifficultyIndex: this.#safeDifficultyIndex(parsed?.progression?.manualDifficultyIndex, inferredDifficultyIndex),
 			status: legacy.status,
 		};
 	}
@@ -546,6 +583,11 @@ export default class Main {
 				rewards: this.#settings.rewards,
 				activeSensors: this.#activeSensors,
 				pendingSensors: this.#pendingSensors,
+				progression: {
+					mode: this.#settings.promotionMode,
+					smartDifficultyIndex: this.#smartDifficultyIndex,
+					manualDifficultyIndex: this.#manualDifficultyIndex,
+				},
 			};
 			localStorage.setItem(LAB_STATE_KEY, JSON.stringify(state));
 			if (state.champion) localStorage.setItem('bestBrain', JSON.stringify(state.champion));
@@ -559,7 +601,7 @@ export default class Main {
 	}
 
 	#completeGeneration({ forceChampion = false } = {}) {
-		if (!this.#bestCar || this.#generationTick < 1) return;
+		if (!this.#bestCar || this.#generationTick < 1) return false;
 		const score = Math.max(0, this.#score(this.#bestCar));
 		this.#pastRuns.push({
 			generation: this.#generation,
@@ -574,7 +616,17 @@ export default class Main {
 			this.#championBrain = cloneBrain(this.#bestCar.brain);
 			this.#championFitness = score;
 		}
+		let promoted = false;
+		if (
+			this.#settings.promotionMode === 'smart' &&
+			this.#smartDifficultyIndex < DIFFICULTIES.length - 1 &&
+			this.#smartPromotionProgress() >= 2
+		) {
+			this.#smartDifficultyIndex += 1;
+			promoted = true;
+		}
 		this.#persistLabState();
+		return promoted;
 	}
 
 	#startGeneration({ keepElite = true, status = null } = {}) {
@@ -642,6 +694,7 @@ export default class Main {
 		);
 		this.#ui.status.textContent = status ?? (this.#championBrain ? `EVOLVING SAVED CHAMPION · ${this.#difficulty.label}` : 'SEARCHING FROM RANDOM');
 		this.#renderGarage();
+		this.#syncPromotionControls();
 	}
 
 	#loadSavedBrain() {
@@ -663,9 +716,13 @@ export default class Main {
 		this.#championFitness = saved.championFitness;
 		this.#pastRuns = saved.completedRuns;
 		this.#settings.rewards = saved.rewards;
+		this.#settings.promotionMode = saved.promotionMode;
+		this.#smartDifficultyIndex = saved.smartDifficultyIndex;
+		this.#manualDifficultyIndex = saved.manualDifficultyIndex;
 		this.#activeSensors = saved.activeSensors;
 		this.#pendingSensors = saved.pendingSensors;
 		this.#syncRewardInputs();
+		this.#syncPromotionControls();
 		this.#generation = 0;
 		this.#bestCar = null;
 		this.#startGeneration({ keepElite: false, status: saved.status });
@@ -676,8 +733,11 @@ export default class Main {
 	};
 
 	#nextGeneration = () => {
-		this.#completeGeneration();
-		this.#startGeneration({ keepElite: true });
+		const promoted = this.#completeGeneration();
+		this.#startGeneration({
+			keepElite: true,
+			status: promoted ? `SMART PROMOTION · ${DIFFICULTIES[this.#smartDifficultyIndex].label}` : null,
+		});
 	};
 
 	#syncRewardInputs() {
@@ -686,6 +746,36 @@ export default class Main {
 			if (input) input.value = String(value);
 		}
 	}
+
+	#syncPromotionControls() {
+		const mode = document.getElementById('promotion-mode');
+		const promote = document.getElementById('promote-difficulty');
+		if (!mode || !promote) return;
+		mode.value = this.#settings.promotionMode;
+		const currentIndex = this.#settings.promotionMode === 'manual'
+			? this.#manualDifficultyIndex
+			: this.#smartDifficultyIndex;
+		const next = DIFFICULTIES[currentIndex + 1] ?? null;
+		promote.disabled = this.#settings.promotionMode !== 'manual' || !next;
+		promote.textContent = this.#settings.promotionMode === 'smart'
+			? next ? `SMART · ${this.#smartPromotionProgress()}/2 RUNS` : 'MAX TIER'
+			: next ? `PROMOTE TO ${next.unlockLabel} ↑` : 'MAX TIER';
+		promote.title = this.#settings.promotionMode === 'smart'
+			? 'Smart promotion requires two consecutive runs above the next fitness milestone'
+			: next ? `Complete this run and start ${next.label}` : 'The course is already at its highest tier';
+	}
+
+	#promoteDifficulty = () => {
+		if (this.#settings.promotionMode !== 'manual' || this.#manualDifficultyIndex >= DIFFICULTIES.length - 1) return;
+		this.#completeGeneration();
+		this.#manualDifficultyIndex += 1;
+		this.#persistLabState();
+		this.#startGeneration({
+			keepElite: true,
+			status: `MANUAL PROMOTION · ${DIFFICULTIES[this.#manualDifficultyIndex].label}`,
+		});
+		this.#syncPromotionControls();
+	};
 
 	#bindRewards() {
 		const keys = Object.keys(REWARD_DEFAULTS);
@@ -829,6 +919,7 @@ export default class Main {
 		const trafficDensity = document.getElementById('traffic-density');
 		const population = document.getElementById('population-size');
 		const autoEvolve = document.getElementById('auto-evolve');
+		const promotionMode = document.getElementById('promotion-mode');
 
 		this.#settings.speed = Number(speed.value);
 		this.#settings.duration = duration.value;
@@ -869,9 +960,19 @@ export default class Main {
 			this.#nextGeneration();
 		};
 		autoEvolve.onchange = () => (this.#settings.autoEvolve = autoEvolve.checked);
+		promotionMode.onchange = () => {
+			const currentIndex = DIFFICULTIES.indexOf(this.#difficulty);
+			this.#settings.promotionMode = promotionMode.value === 'manual' ? 'manual' : 'smart';
+			if (this.#settings.promotionMode === 'manual') this.#manualDifficultyIndex = currentIndex;
+			else this.#smartDifficultyIndex = currentIndex;
+			this.#persistLabState();
+			this.#syncPromotionControls();
+			this.#ui.status.textContent = `${this.#settings.promotionMode.toUpperCase()} PROMOTION · APPLIES NEXT RUN`;
+		};
 
 		document.getElementById('next-generation').onclick = this.#nextGeneration;
 		document.getElementById('reset-run').onclick = this.#resetPopulation;
+		document.getElementById('promote-difficulty').onclick = this.#promoteDifficulty;
 		this.#bindRewards();
 		this.#bindGarage();
 	}
@@ -975,9 +1076,12 @@ export default class Main {
 		dashboard.passes.textContent = String(snapshot.passes);
 		dashboard.window.textContent = `${Math.round(this.#generationLimit / TICKS_PER_SECOND)} S${this.#smartExtensions ? ` · +${this.#smartExtensions}` : ''}`;
 		dashboard.difficulty.textContent = this.#difficulty.label;
+		dashboard.promotion.textContent = this.#settings.promotionMode === 'smart' ? 'SMART / 2 RUNS' : 'MANUAL / USER';
 		const nextDifficulty = this.#nextDifficulty();
 		dashboard.nextUnlock.textContent = nextDifficulty
-			? `${nextDifficulty.unlockLabel} · ${nextDifficulty.milestone >= 10000 ? `${Math.round(nextDifficulty.milestone / 1000)}K` : `${(nextDifficulty.milestone / 1000).toFixed(1)}K`}`
+			? `${nextDifficulty.unlockLabel} · ${this.#settings.promotionMode === 'smart'
+				? `${nextDifficulty.milestone >= 10000 ? `${Math.round(nextDifficulty.milestone / 1000)}K` : `${(nextDifficulty.milestone / 1000).toFixed(1)}K`} · ${this.#smartPromotionProgress()}/2`
+				: 'READY'}`
 			: 'MAX TIER';
 		dashboard.seed.textContent = this.#trafficSeed.toString(16).toUpperCase().padStart(8, '0').slice(-8);
 		dashboard.progressReward.textContent = signed(breakdown.progress);
