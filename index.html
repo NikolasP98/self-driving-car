@@ -8,16 +8,94 @@
 		<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 		<link rel="stylesheet" href="/style.css" />
 	</head>
-	<body>
+	<body data-view="drive">
 		<header class="docket">
-			<div><strong>PINONITE / SOURCE LAB</strong><span>FIVE RAYS INTO FOUR DECISIONS</span></div>
+			<div class="brand"><strong>PINONITE / SOURCE LAB</strong><span>FIVE RAYS INTO FOUR DECISIONS</span></div>
+			<nav class="view-switcher" aria-label="Simulation view">
+				<button type="button" data-view-button="drive" aria-pressed="true">DRIVE</button>
+				<button type="button" data-view-button="network" aria-pressed="false">NETWORK</button>
+				<button type="button" data-view-button="fitness" aria-pressed="false">FITNESS</button>
+			</nav>
 			<span id="run-status">EVOLUTIONARY DRIVING · LIVE</span>
 		</header>
 
-		<canvas id="canvas" aria-label="Road simulation with neural cars and traffic"></canvas>
-		<canvas id="network" aria-label="Neural network activity for the current champion"></canvas>
+		<main id="simulation-stage" class="stage">
+			<canvas id="canvas" aria-label="Road simulation with neural cars and traffic"></canvas>
 
-		<section class="lab-console" aria-label="Evolution controls and live results">
+			<section id="inspection-panel" class="inspection" aria-label="Neural network and fitness inspection">
+				<canvas id="network" aria-label="Neural network activity for the current champion"></canvas>
+
+				<section id="fitness-dashboard" class="fitness-dashboard" aria-label="Live evolutionary fitness dashboard">
+					<header class="training-head">
+						<div><strong>EVOLUTION MONITOR</strong><span>COMPOSITE FITNESS / LIVE</span></div>
+						<p>GEN <output id="dashboard-generation">01</output> · SAMPLE <output id="dashboard-sample">000</output></p>
+					</header>
+
+					<aside class="learning-state">
+						<h2>LEARNING STATE</h2>
+						<dl>
+							<div><dt>CHAMPION</dt><dd id="dashboard-best">0</dd></div>
+							<div><dt>AVERAGE</dt><dd id="dashboard-average">0</dd></div>
+							<div><dt>ALIVE</dt><dd id="dashboard-alive">100%</dd></div>
+							<div><dt>PACE</dt><dd id="dashboard-pace">0.0 / 3.2</dd></div>
+							<div><dt>OVERTAKES</dt><dd id="dashboard-passes">0</dd></div>
+						</dl>
+
+						<h2>FITNESS LEDGER</h2>
+						<ul class="fitness-ledger">
+							<li><span>FORWARD PROGRESS</span><output id="reward-progress">+0</output></li>
+							<li><span>PACE REWARD</span><output id="reward-pace">+0</output></li>
+							<li><span>PASSING BONUS</span><output id="reward-passes">+0</output></li>
+							<li class="penalty"><span>TAILING</span><output id="penalty-tailing">−0</output></li>
+							<li class="penalty"><span>IDLING</span><output id="penalty-idle">−0</output></li>
+							<li class="penalty"><span>COLLISION</span><output id="penalty-collision">−0</output></li>
+						</ul>
+					</aside>
+
+					<div class="chart-grid">
+						<article class="chart cobalt">
+							<header><span>CHAMPION FITNESS</span><output id="fitness-chart-value">0</output></header>
+							<svg viewBox="0 0 320 100" preserveAspectRatio="none" role="img" aria-label="Champion fitness over time">
+								<path class="chart-gridlines" d="M0 25H320M0 50H320M0 75H320M80 0V100M160 0V100M240 0V100" />
+								<path id="fitness-chart-area" class="chart-area" />
+								<path id="fitness-chart-line" class="chart-line" />
+							</svg>
+						</article>
+
+						<article class="chart signal">
+							<header><span>AVERAGE FITNESS</span><output id="average-chart-value">0</output></header>
+							<svg viewBox="0 0 320 100" preserveAspectRatio="none" role="img" aria-label="Population average fitness over time">
+								<path class="chart-gridlines" d="M0 25H320M0 50H320M0 75H320M80 0V100M160 0V100M240 0V100" />
+								<path id="average-chart-area" class="chart-area" />
+								<path id="average-chart-line" class="chart-line" />
+							</svg>
+						</article>
+
+						<article class="chart proof">
+							<header><span>POPULATION ALIVE</span><output id="survival-chart-value">100%</output></header>
+							<svg viewBox="0 0 320 100" preserveAspectRatio="none" role="img" aria-label="Population survival over time">
+								<path class="chart-gridlines" d="M0 25H320M0 50H320M0 75H320M80 0V100M160 0V100M240 0V100" />
+								<path id="survival-chart-area" class="chart-area" />
+								<path id="survival-chart-line" class="chart-line" />
+							</svg>
+						</article>
+
+						<article class="chart amber">
+							<header><span>CHAMPION PACE</span><output id="pace-chart-value">0.0</output></header>
+							<svg viewBox="0 0 320 100" preserveAspectRatio="none" role="img" aria-label="Champion average pace over time">
+								<path class="chart-gridlines" d="M0 25H320M0 50H320M0 75H320M80 0V100M160 0V100M240 0V100" />
+								<path id="pace-chart-area" class="chart-area" />
+								<path id="pace-chart-line" class="chart-line" />
+							</svg>
+						</article>
+					</div>
+				</section>
+
+				<div class="legend"><span id="view-legend-primary">ROAD + FIVE RAYS</span><span id="view-legend-secondary">5 → 6 → 4 NETWORK</span></div>
+			</section>
+		</main>
+
+		<footer class="lab-console" aria-label="Evolution controls and live results">
 			<div class="telemetry" aria-live="polite">
 				<div><output id="generation-value">01</output><span>GEN</span></div>
 				<div><output id="active-value">120</output><span>ACTIVE</span></div>
@@ -73,9 +151,8 @@
 				<button id="save-brain" title="Save the current fitness champion in this browser">SAVE CHAMPION</button>
 				<button id="delete-brain" title="Discard the locally saved champion">DISCARD SAVED</button>
 			</div>
-		</section>
+		</footer>
 
-		<div class="legend"><span>ROAD + FIVE RAYS</span><span>5 → 6 → 4 NETWORK</span></div>
 		<script type="module" src="/app.js"></script>
 	</body>
 </html>

@@ -6,8 +6,10 @@ import Visualizer from './classes/visualizer';
 const START_Y = 100;
 const GENERATION_TICKS = 1500;
 const MIN_GENERATION_TICKS = 240;
+const MAX_SAMPLES = 80;
 
 const cloneBrain = (brain) => JSON.parse(JSON.stringify(brain));
+const signed = (value, sign = '+') => `${sign}${Math.round(Math.max(0, value))}`;
 
 const seededRandom = (seed) => {
 	let state = seed >>> 0;
@@ -18,6 +20,23 @@ const seededRandom = (seed) => {
 		value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
 		return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
 	};
+};
+
+const chartPath = (values, bounds = {}) => {
+	if (!values.length) return { line: '', area: '' };
+	const width = 320;
+	const height = 100;
+	const minimum = bounds.min ?? Math.min(0, ...values);
+	const maximum = bounds.max ?? Math.max(1, ...values);
+	const range = Math.max(0.001, maximum - minimum);
+	const points = values.map((value, index) => {
+		const x = values.length === 1 ? width : (index / (values.length - 1)) * width;
+		const y = height - ((value - minimum) / range) * (height - 8) - 4;
+		return [x, Math.max(4, Math.min(height - 4, y))];
+	});
+	const line = points.map(([x, y], index) => `${index ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join(' ');
+	const area = `${line} L${points[points.length - 1][0].toFixed(1)} ${height} L${points[0][0].toFixed(1)} ${height} Z`;
+	return { line, area };
 };
 
 export default class Main {
@@ -36,6 +55,11 @@ export default class Main {
 	#generationTick = 0;
 	#animation = 0;
 	#running = false;
+	#recoveries = 0;
+	#stableFrames = 0;
+	#sampleIndex = 0;
+	#lastSampleKey = '';
+	#series = { fitness: [], average: [], survival: [], pace: [] };
 	#settings = {
 		speed: 2,
 		mutation: 0.12,
@@ -59,6 +83,43 @@ export default class Main {
 			passes: document.getElementById('passes-value'),
 			progress: document.getElementById('generation-progress'),
 			status: document.getElementById('run-status'),
+			dashboard: {
+				generation: document.getElementById('dashboard-generation'),
+				sample: document.getElementById('dashboard-sample'),
+				best: document.getElementById('dashboard-best'),
+				average: document.getElementById('dashboard-average'),
+				alive: document.getElementById('dashboard-alive'),
+				pace: document.getElementById('dashboard-pace'),
+				passes: document.getElementById('dashboard-passes'),
+				progressReward: document.getElementById('reward-progress'),
+				paceReward: document.getElementById('reward-pace'),
+				passesReward: document.getElementById('reward-passes'),
+				tailingPenalty: document.getElementById('penalty-tailing'),
+				idlePenalty: document.getElementById('penalty-idle'),
+				collisionPenalty: document.getElementById('penalty-collision'),
+				charts: {
+					fitness: {
+						value: document.getElementById('fitness-chart-value'),
+						line: document.getElementById('fitness-chart-line'),
+						area: document.getElementById('fitness-chart-area'),
+					},
+					average: {
+						value: document.getElementById('average-chart-value'),
+						line: document.getElementById('average-chart-line'),
+						area: document.getElementById('average-chart-area'),
+					},
+					survival: {
+						value: document.getElementById('survival-chart-value'),
+						line: document.getElementById('survival-chart-line'),
+						area: document.getElementById('survival-chart-area'),
+					},
+					pace: {
+						value: document.getElementById('pace-chart-value'),
+						line: document.getElementById('pace-chart-line'),
+						area: document.getElementById('pace-chart-area'),
+					},
+				},
+			},
 		};
 	}
 
@@ -77,7 +138,7 @@ export default class Main {
 			standard: { gap: 430, rows: 36, secondCarChance: 0.48 },
 			dense: { gap: 350, rows: 42, secondCarChance: 0.72 },
 		};
-		const profile = profiles[this.#settings.traffic];
+		const profile = profiles[this.#settings.traffic] ?? profiles.standard;
 		const random = seededRandom(9801);
 		const traffic = [];
 
@@ -107,21 +168,35 @@ export default class Main {
 		return this.#metrics.get(car);
 	}
 
-	#score(car) {
+	#scoreBreakdown(car) {
 		const metric = this.#metricFor(car);
-		if (!metric) return Number.NEGATIVE_INFINITY;
+		if (!metric) {
+			return { progress: 0, pace: 0, passing: 0, tailing: 0, idle: 0, collision: 0, total: Number.NEGATIVE_INFINITY, averageSpeed: 0 };
+		}
 
 		const progress = Math.max(0, START_Y - car.y);
 		const averageSpeed = metric.ticks ? metric.speedTotal / metric.ticks : 0;
 		const paceRatio = Math.min(1.15, Math.max(0, averageSpeed) / this.#settings.pace);
-		return (
-			progress +
-			metric.passes * 260 +
-			paceRatio * 190 -
-			metric.followingTicks * 0.16 -
-			metric.idleTicks * 0.12 -
-			(car.damaged ? 900 : 0)
-		);
+		const pace = paceRatio * 190;
+		const passing = metric.passes * 260;
+		const tailing = metric.followingTicks * 0.16;
+		const idle = metric.idleTicks * 0.12;
+		const collision = car.damaged ? 900 : 0;
+
+		return {
+			progress,
+			pace,
+			passing,
+			tailing,
+			idle,
+			collision,
+			averageSpeed,
+			total: progress + pace + passing - tailing - idle - collision,
+		};
+	}
+
+	#score(car) {
+		return this.#scoreBreakdown(car).total;
 	}
 
 	#recordMetrics(car) {
@@ -161,10 +236,15 @@ export default class Main {
 		this.#bestCar = leader;
 	}
 
-	#startGeneration({ keepElite = true } = {}) {
-		if (keepElite && this.#bestCar?.brain) this.#championBrain = cloneBrain(this.#bestCar.brain);
+	#startGeneration({ keepElite = true, status = null } = {}) {
+		if (keepElite && NeuralNetwork.isValid(this.#bestCar?.brain)) {
+			this.#championBrain = cloneBrain(this.#bestCar.brain);
+		}
+		if (!NeuralNetwork.isValid(this.#championBrain)) this.#championBrain = null;
+
 		this.#generation += 1;
 		this.#generationTick = 0;
+		this.#lastSampleKey = '';
 		this.#traffic = this.#generateTraffic();
 		this.#cars = this.#generateCars();
 		this.#metrics = new Map(
@@ -183,16 +263,37 @@ export default class Main {
 				}
 			}
 		}
+
 		this.#bestCar = this.#cars[0];
-		this.#ui.status.textContent = this.#championBrain ? 'EVOLVING ELITE' : 'SEARCHING FROM RANDOM';
+		this.#bestCar.sensor?.update(this.#street.borders, this.#traffic);
+		this.#ui.status.textContent = status ?? (this.#championBrain ? 'EVOLVING ELITE' : 'SEARCHING FROM RANDOM');
+	}
+
+	#loadSavedBrain() {
+		const saved = localStorage.getItem('bestBrain');
+		if (!saved) return { brain: null, status: null };
+		try {
+			const brain = JSON.parse(saved);
+			if (NeuralNetwork.isValid(brain)) return { brain, status: null };
+		} catch (error) {
+			console.warn('Saved champion could not be parsed.', error);
+		}
+		localStorage.removeItem('bestBrain');
+		return { brain: null, status: 'STALE CHAMPION CLEARED · RANDOM RESTART' };
 	}
 
 	#resetPopulation = () => {
-		const saved = localStorage.getItem('bestBrain');
-		this.#championBrain = saved ? JSON.parse(saved) : null;
+		const saved = this.#loadSavedBrain();
+		this.#championBrain = saved.brain;
 		this.#generation = 0;
 		this.#bestCar = null;
-		this.#startGeneration({ keepElite: false });
+		this.#series = { fitness: [], average: [], survival: [], pace: [] };
+		this.#sampleIndex = 0;
+		this.#startGeneration({ keepElite: false, status: saved.status });
+		if (!this.#running) {
+			this.#running = true;
+			this.#animation = window.requestAnimationFrame(this.#animate);
+		}
 	};
 
 	#nextGeneration = () => {
@@ -200,7 +301,7 @@ export default class Main {
 	};
 
 	#save = () => {
-		if (!this.#bestCar?.brain) return;
+		if (!NeuralNetwork.isValid(this.#bestCar?.brain)) return;
 		localStorage.setItem('bestBrain', JSON.stringify(this.#bestCar.brain));
 		this.#championBrain = cloneBrain(this.#bestCar.brain);
 		this.#ui.status.textContent = 'CHAMPION SAVED LOCALLY';
@@ -286,35 +387,134 @@ export default class Main {
 		this.#bestCar.draw(this.#ctx, true, true);
 		this.#ctx.restore();
 
-		this.#netCtx.lineDashOffset = -time / 60;
-		Visualizer.drawNetwork(this.#netCtx, this.#bestCar.brain);
+		if (document.body.dataset.view !== 'fitness') {
+			if (!NeuralNetwork.isValid(this.#bestCar.brain)) throw new Error('Champion brain schema is invalid.');
+			this.#netCtx.lineDashOffset = -time / 60;
+			Visualizer.drawNetwork(this.#netCtx, this.#bestCar.brain);
+		}
+	}
+
+	#snapshot() {
+		const breakdown = this.#scoreBreakdown(this.#bestCar);
+		const scores = this.#cars.map((car) => Math.max(0, this.#score(car)));
+		const active = this.#cars.reduce((count, car) => count + (car.damaged ? 0 : 1), 0);
+		const average = scores.reduce((sum, score) => sum + score, 0) / Math.max(1, scores.length);
+		return {
+			breakdown,
+			active,
+			alivePercent: (active / Math.max(1, this.#cars.length)) * 100,
+			average,
+			passes: this.#metricFor(this.#bestCar)?.passes ?? 0,
+		};
+	}
+
+	#renderChart(chart, values, bounds) {
+		const path = chartPath(values, bounds);
+		chart.line.setAttribute('d', path.line);
+		chart.area.setAttribute('d', path.area);
+	}
+
+	#updateDashboard(snapshot) {
+		const dashboard = this.#ui.dashboard;
+		const { breakdown } = snapshot;
+		dashboard.generation.textContent = String(this.#generation).padStart(2, '0');
+		dashboard.best.textContent = String(Math.max(0, Math.round(breakdown.total)));
+		dashboard.average.textContent = String(Math.round(snapshot.average));
+		dashboard.alive.textContent = `${Math.round(snapshot.alivePercent)}%`;
+		dashboard.pace.textContent = `${breakdown.averageSpeed.toFixed(1)} / ${this.#settings.pace.toFixed(1)}`;
+		dashboard.passes.textContent = String(snapshot.passes);
+		dashboard.progressReward.textContent = signed(breakdown.progress);
+		dashboard.paceReward.textContent = signed(breakdown.pace);
+		dashboard.passesReward.textContent = signed(breakdown.passing);
+		dashboard.tailingPenalty.textContent = signed(breakdown.tailing, '−');
+		dashboard.idlePenalty.textContent = signed(breakdown.idle, '−');
+		dashboard.collisionPenalty.textContent = signed(breakdown.collision, '−');
+
+		const sampleKey = `${this.#generation}:${Math.floor(this.#generationTick / 30)}`;
+		if (sampleKey !== this.#lastSampleKey) {
+			this.#lastSampleKey = sampleKey;
+			this.#sampleIndex += 1;
+			this.#series.fitness.push(Math.max(0, breakdown.total));
+			this.#series.average.push(snapshot.average);
+			this.#series.survival.push(snapshot.alivePercent);
+			this.#series.pace.push(breakdown.averageSpeed);
+			for (const values of Object.values(this.#series)) {
+				if (values.length > MAX_SAMPLES) values.shift();
+			}
+
+			this.#renderChart(dashboard.charts.fitness, this.#series.fitness);
+			this.#renderChart(dashboard.charts.average, this.#series.average);
+			this.#renderChart(dashboard.charts.survival, this.#series.survival, { min: 0, max: 100 });
+			this.#renderChart(dashboard.charts.pace, this.#series.pace, { min: 0, max: this.#settings.pace * 1.1 });
+		}
+		dashboard.sample.textContent = String(this.#sampleIndex).padStart(3, '0');
+
+		dashboard.charts.fitness.value.textContent = String(Math.max(0, Math.round(breakdown.total)));
+		dashboard.charts.average.value.textContent = String(Math.round(snapshot.average));
+		dashboard.charts.survival.value.textContent = `${Math.round(snapshot.alivePercent)}%`;
+		dashboard.charts.pace.value.textContent = breakdown.averageSpeed.toFixed(1);
 	}
 
 	#updateUi() {
-		const metric = this.#metricFor(this.#bestCar);
-		const activeCars = this.#cars.reduce((count, car) => count + (car.damaged ? 0 : 1), 0);
+		const snapshot = this.#snapshot();
 		this.#ui.generation.textContent = String(this.#generation).padStart(2, '0');
-		this.#ui.active.textContent = String(activeCars);
-		this.#ui.score.textContent = String(Math.max(0, Math.round(this.#score(this.#bestCar))));
-		this.#ui.passes.textContent = String(metric?.passes ?? 0).padStart(2, '0');
+		this.#ui.active.textContent = String(snapshot.active);
+		this.#ui.score.textContent = String(Math.max(0, Math.round(snapshot.breakdown.total)));
+		this.#ui.passes.textContent = String(snapshot.passes).padStart(2, '0');
 		this.#ui.progress.value = Math.min(1, this.#generationTick / GENERATION_TICKS);
+		this.#updateDashboard(snapshot);
+	}
+
+	#recover(error) {
+		console.error('Neural-car runtime recovered from an invalid frame.', error);
+		this.#recoveries += 1;
+		this.#stableFrames = 0;
+		if (!NeuralNetwork.isValid(this.#bestCar?.brain)) localStorage.removeItem('bestBrain');
+		this.#championBrain = null;
+
+		if (this.#recoveries > 2) {
+			this.#running = false;
+			this.#ui.status.textContent = 'PAUSED AFTER REPEATED ERROR · RESET RUN';
+			return;
+		}
+
+		this.#startGeneration({ keepElite: false, status: 'FRAME RECOVERED · NEW RANDOM POPULATION' });
 	}
 
 	#animate = (time) => {
 		if (!this.#running) return;
-		for (let tick = 0; tick < this.#settings.speed; tick++) this.#simulateTick();
-		this.#draw(time);
-		this.#updateUi();
-		this.#animation = window.requestAnimationFrame(this.#animate);
+		try {
+			for (let tick = 0; tick < this.#settings.speed; tick++) this.#simulateTick();
+			this.#draw(time);
+			this.#updateUi();
+			this.#stableFrames += 1;
+			if (this.#stableFrames > 120) this.#recoveries = 0;
+		} catch (error) {
+			this.#recover(error);
+		} finally {
+			if (this.#running) this.#animation = window.requestAnimationFrame(this.#animate);
+		}
 	};
 
 	init = () => {
 		this.#street = new Street(this.#width / 2, this.#width * 0.86);
 		this.#bindControls();
-		this.#resetPopulation();
 		this.#running = true;
+		this.#resetPopulation();
 		this.#animation = window.requestAnimationFrame(this.#animate);
 	};
+
+	resize({ width, height, netWidth }) {
+		const horizontalScale = this.#width ? width / this.#width : 1;
+		if (Number.isFinite(horizontalScale) && horizontalScale > 0 && horizontalScale !== 1) {
+			for (const car of this.#cars) car.x *= horizontalScale;
+			for (const obstacle of this.#traffic) obstacle.x *= horizontalScale;
+		}
+		this.#width = width;
+		this.#height = height;
+		this.#netWidth = netWidth;
+		this.#street = new Street(this.#width / 2, this.#width * 0.86);
+	}
 
 	stop() {
 		this.#running = false;

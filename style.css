@@ -5,6 +5,7 @@
 	--cobalt: #1849c6;
 	--signal: #d6f05f;
 	--proof: #ad3f27;
+	--amber: #e4ae35;
 	--muted: #777870;
 }
 
@@ -20,45 +21,249 @@ body {
 	font-family: Arial, sans-serif;
 }
 
-body { display: grid; grid-template-columns: minmax(280px, 38%) minmax(0, 62%); }
-canvas { display: block; width: 100%; height: 100%; }
-#canvas { background: var(--slip); border-right: 1px solid var(--paper); }
-#network { background: var(--carbon); }
+body {
+	display: grid;
+	grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+button,
+select,
+input { font: inherit; }
 
 .docket {
-	position: absolute;
+	position: relative;
 	z-index: 6;
-	top: 0;
-	left: 0;
-	right: 0;
+	display: grid;
+	grid-template-columns: minmax(250px, 1fr) auto minmax(180px, 1fr);
+	align-items: stretch;
 	min-height: 52px;
+	border: 1px solid var(--carbon);
+	background: var(--paper);
+	color: var(--carbon);
+	font: 700 0.62rem/1.3 monospace;
+	letter-spacing: 0.06em;
+}
+
+.brand {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 0.55rem 1.1rem;
+	min-width: 0;
+	padding: 0.7rem 1rem;
+}
+
+.brand strong { color: var(--cobalt); }
+.docket > span {
+	display: grid;
+	place-items: center end;
+	min-width: 0;
+	padding: 0.7rem 1rem;
+	color: var(--proof);
+	text-align: right;
+}
+
+.view-switcher {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(72px, 1fr));
+	border-inline: 1px solid var(--carbon);
+}
+
+.view-switcher button {
+	min-height: 50px;
+	padding: 0.55rem 0.75rem;
+	border: 0;
+	border-right: 1px dotted rgb(18 22 19 / 30%);
+	background: var(--paper);
+	color: var(--muted);
+	cursor: pointer;
+	font: 700 0.55rem/1 monospace;
+	letter-spacing: 0.06em;
+}
+
+.view-switcher button:last-child { border-right: 0; }
+.view-switcher button[aria-pressed='true'] { background: var(--cobalt); color: var(--paper); }
+.view-switcher button:hover,
+.view-switcher button:focus-visible { background: var(--signal); color: var(--carbon); outline: 0; }
+
+.stage {
+	position: relative;
+	display: grid;
+	grid-template-columns: minmax(300px, 62%) minmax(280px, 38%);
+	min-width: 0;
+	min-height: 0;
+	overflow: hidden;
+}
+
+body[data-view='network'] .stage { grid-template-columns: minmax(280px, 32%) minmax(420px, 68%); }
+body[data-view='fitness'] .stage { grid-template-columns: minmax(280px, 34%) minmax(480px, 66%); }
+
+canvas {
+	display: block;
+	width: 100%;
+	height: 100%;
+	min-width: 0;
+	min-height: 0;
+}
+
+#canvas { background: var(--slip); border-right: 1px solid var(--paper); }
+.inspection { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: var(--carbon); }
+#network { background: var(--carbon); }
+
+.legend {
+	position: absolute;
+	z-index: 4;
+	right: 0.85rem;
+	bottom: 0.85rem;
+	display: flex;
+	max-width: calc(100% - 1.7rem);
+	border: 1px solid var(--paper);
+	background: rgb(18 22 19 / 90%);
+	color: var(--paper);
+	pointer-events: none;
+}
+
+.legend span {
+	min-width: 0;
+	padding: 0.62rem 0.72rem;
+	font: 700 0.5rem/1.2 monospace;
+	letter-spacing: 0.04em;
+	white-space: nowrap;
+}
+
+.legend span + span { border-left: 1px solid rgb(241 239 231 / 40%); color: var(--signal); }
+body[data-view='fitness'] .legend { display: none; }
+
+.fitness-dashboard {
+	position: absolute;
+	inset: 0;
+	display: none;
+	grid-template-columns: minmax(180px, 0.72fr) minmax(0, 2.3fr);
+	grid-template-rows: auto minmax(0, 1fr);
+	min-width: 0;
+	min-height: 0;
+	background-color: var(--carbon);
+	background-image: radial-gradient(rgb(241 239 231 / 10%) 0.7px, transparent 0.7px);
+	background-size: 14px 14px;
+	color: var(--paper);
+}
+
+body[data-view='fitness'] #network { display: none; }
+body[data-view='fitness'] .fitness-dashboard { display: grid; }
+
+.training-head {
+	grid-column: 1 / -1;
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
 	gap: 1rem;
-	padding: 0.75rem 1rem;
-	border: 1px solid var(--carbon);
-	background: rgb(241 239 231 / 95%);
-	color: var(--carbon);
-	pointer-events: none;
-	font: 700 0.64rem/1.3 monospace;
-	letter-spacing: 0.06em;
+	min-width: 0;
+	padding: 0.65rem 0.8rem;
+	border-bottom: 1px solid rgb(241 239 231 / 45%);
+	background: rgb(18 22 19 / 93%);
+	font-family: monospace;
 }
 
-.docket div { display: flex; flex-wrap: wrap; gap: 0.65rem 1.2rem; }
-.docket strong { color: var(--cobalt); }
-.docket > span { color: var(--proof); text-align: right; }
+.training-head div { display: flex; flex-wrap: wrap; gap: 0.45rem 1rem; min-width: 0; }
+.training-head strong,
+.training-head span,
+.training-head p { margin: 0; font: 700 0.54rem/1.25 monospace; letter-spacing: 0.06em; }
+.training-head strong { color: var(--cobalt); }
+.training-head span { color: var(--paper); }
+.training-head p { color: var(--signal); white-space: nowrap; }
+
+.learning-state {
+	min-width: 0;
+	min-height: 0;
+	overflow: auto;
+	border-right: 1px solid rgb(241 239 231 / 35%);
+	background: rgb(18 22 19 / 88%);
+	scrollbar-width: thin;
+	scrollbar-color: var(--muted) transparent;
+}
+
+.learning-state::-webkit-scrollbar { width: 6px; }
+.learning-state::-webkit-scrollbar-track { background: transparent; }
+.learning-state::-webkit-scrollbar-thumb { background: var(--muted); }
+
+.learning-state h2 {
+	margin: 0;
+	padding: 0.65rem 0.75rem;
+	border-bottom: 1px solid rgb(241 239 231 / 24%);
+	color: var(--muted);
+	font: 700 0.53rem/1.2 monospace;
+	letter-spacing: 0.08em;
+}
+
+.learning-state dl { margin: 0; padding: 0.55rem 0.75rem 0.7rem; }
+.learning-state dl div,
+.fitness-ledger li {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 0.75rem;
+	padding: 0.34rem 0;
+	border-bottom: 1px dotted rgb(241 239 231 / 18%);
+	font: 700 0.5rem/1.2 monospace;
+}
+
+.learning-state dt { color: var(--muted); }
+.learning-state dd { margin: 0; color: var(--signal); }
+.fitness-ledger { margin: 0; padding: 0.55rem 0.75rem 0.8rem; list-style: none; }
+.fitness-ledger span { color: var(--muted); }
+.fitness-ledger output { color: var(--signal); }
+.fitness-ledger .penalty output { color: #e76d55; }
+
+.chart-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	grid-template-rows: repeat(2, minmax(0, 1fr));
+	gap: 1px;
+	min-width: 0;
+	min-height: 0;
+	background: rgb(241 239 231 / 28%);
+}
+
+.chart {
+	--chart-color: var(--cobalt);
+	position: relative;
+	display: grid;
+	grid-template-rows: auto minmax(0, 1fr);
+	min-width: 0;
+	min-height: 0;
+	margin: 0;
+	background: rgb(18 22 19 / 96%);
+	overflow: hidden;
+}
+
+.chart.signal { --chart-color: var(--signal); }
+.chart.proof { --chart-color: #e65a48; }
+.chart.amber { --chart-color: var(--amber); }
+
+.chart header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.75rem;
+	padding: 0.58rem 0.7rem;
+	border-bottom: 1px solid rgb(241 239 231 / 12%);
+	color: var(--chart-color);
+	font: 700 0.53rem/1.2 monospace;
+	letter-spacing: 0.04em;
+}
+
+.chart svg { display: block; width: 100%; height: 100%; min-height: 0; overflow: visible; }
+.chart-gridlines { fill: none; stroke: rgb(241 239 231 / 8%); stroke-width: 0.8; vector-effect: non-scaling-stroke; }
+.chart-area { fill: color-mix(in srgb, var(--chart-color) 18%, transparent); stroke: none; }
+.chart-line { fill: none; stroke: var(--chart-color); stroke-width: 2; vector-effect: non-scaling-stroke; }
 
 .lab-console {
-	position: absolute;
+	position: relative;
 	z-index: 7;
-	left: 0;
-	right: 0;
-	bottom: 0;
 	display: grid;
 	grid-template-columns: minmax(240px, 0.9fr) minmax(420px, 2fr) minmax(220px, 0.85fr);
 	border: 1px solid var(--carbon);
-	background: rgb(241 239 231 / 97%);
+	background: var(--paper);
 	box-shadow: 0 -8px 24px rgb(18 22 19 / 12%);
 	color: var(--carbon);
 }
@@ -149,7 +354,7 @@ input[type='range'] { height: 16px; }
 	min-width: 0;
 }
 
-button {
+.actions button {
 	min-width: 0;
 	min-height: 35px;
 	padding: 0.55rem 0.65rem;
@@ -162,43 +367,40 @@ button {
 	font: 700 0.52rem/1.2 monospace;
 }
 
-button:nth-last-child(-n + 2) { border-bottom: 0; }
-button:hover,
-button:focus-visible { background: var(--signal); outline: 2px solid var(--cobalt); outline-offset: -3px; }
+.actions button:nth-last-child(-n + 2) { border-bottom: 0; }
+.actions button:hover,
+.actions button:focus-visible { background: var(--signal); outline: 2px solid var(--cobalt); outline-offset: -3px; }
 #next-generation { background: var(--signal); }
 #next-generation:hover,
 #next-generation:focus-visible { background: var(--cobalt); color: var(--paper); }
 
-.legend {
-	position: absolute;
-	z-index: 4;
-	right: 1rem;
-	bottom: 104px;
-	display: flex;
-	flex-wrap: wrap;
-	border: 1px solid var(--paper);
-	background: rgb(18 22 19 / 88%);
-	color: var(--paper);
-	pointer-events: none;
-}
-
-.legend span { padding: 0.65rem 0.75rem; font: 700 0.52rem/1.2 monospace; letter-spacing: 0.04em; }
-.legend span + span { border-left: 1px solid rgb(241 239 231 / 40%); color: var(--signal); }
-
 @media (max-width: 980px) {
+	.docket { grid-template-columns: minmax(220px, 1fr) auto; }
+	.docket > span { display: none; }
+	.stage,
+	body[data-view='network'] .stage,
+	body[data-view='fitness'] .stage { grid-template-columns: minmax(250px, 40%) minmax(0, 60%); }
 	.lab-console { grid-template-columns: minmax(205px, 0.75fr) minmax(0, 2fr); }
 	.actions { grid-column: 1 / -1; grid-template-columns: repeat(4, minmax(0, 1fr)); }
-	button { border-top: 1px solid var(--carbon); border-bottom: 0; }
-	.legend { bottom: 130px; }
+	.actions button { border-top: 1px solid var(--carbon); border-bottom: 0; }
+	.fitness-dashboard { grid-template-columns: minmax(155px, 0.68fr) minmax(0, 2fr); }
 }
 
 @media (max-width: 680px) {
-	body { grid-template-columns: 44% 56%; }
-	.docket > span { display: none; }
-	.lab-console { grid-template-columns: 1fr; max-height: 46vh; overflow-y: auto; }
+	.docket { grid-template-columns: 1fr; }
+	.brand { display: none; }
+	.view-switcher { border-inline: 0; border-bottom: 1px solid var(--carbon); }
+	.stage,
+	body[data-view='network'] .stage,
+	body[data-view='fitness'] .stage { grid-template-columns: 42% 58%; }
+	.lab-console { grid-template-columns: 1fr; max-height: 43vh; overflow-y: auto; }
 	.telemetry { border-right: 0; border-bottom: 1px solid var(--carbon); }
 	.tuning { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 	.tuning label { border-bottom: 1px dotted rgb(18 22 19 / 28%); }
 	.actions { grid-column: auto; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 	.legend { display: none; }
+	.fitness-dashboard { grid-template-columns: 1fr; overflow: auto; }
+	.training-head { position: sticky; top: 0; z-index: 2; }
+	.learning-state { max-height: 190px; border-right: 0; border-bottom: 1px solid rgb(241 239 231 / 35%); }
+	.chart-grid { grid-template-columns: 1fr; grid-template-rows: repeat(4, minmax(140px, 1fr)); }
 }

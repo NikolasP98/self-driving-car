@@ -3,11 +3,12 @@ import { ellipse, rect } from './shapes';
 
 export default class Visualizer {
 	static drawNetwork(ctx, network) {
-		const margin = 50;
-		const left = margin;
-		const top = margin;
-		const width = ctx.canvas.width - margin * 2;
-		const height = ctx.canvas.height - margin * 2;
+		const horizontalMargin = Math.max(24, Math.min(52, ctx.canvas.width * 0.07));
+		const verticalMargin = Math.max(28, Math.min(48, ctx.canvas.height * 0.08));
+		const left = horizontalMargin;
+		const top = verticalMargin;
+		const width = Math.max(1, ctx.canvas.width - horizontalMargin * 2);
+		const height = Math.max(1, ctx.canvas.height - verticalMargin * 2);
 
 		const levelHeight = height / network.levels.length;
 
@@ -44,7 +45,8 @@ export default class Visualizer {
 
 		const { inputs, outputs, weights, biases } = level;
 
-		const nodeRadius = 18;
+		const largestLayer = Math.max(inputs.length, outputs.length);
+		const nodeRadius = Math.max(8, Math.min(18, width / (largestLayer * 3.15), height / 24));
 
 		for (let i = 0; i < inputs.length; i++) {
 			for (let j = 0; j < outputs.length; j++) {

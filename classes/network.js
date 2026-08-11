@@ -16,6 +16,35 @@ export default class NeuralNetwork {
 		return outputs;
 	}
 
+	static isValid(network, neuronCounts = [5, 6, 4]) {
+		if (!network || !Array.isArray(network.levels)) return false;
+		if (network.levels.length !== neuronCounts.length - 1) return false;
+
+		return network.levels.every((level, levelIndex) => {
+			const inputCount = neuronCounts[levelIndex];
+			const outputCount = neuronCounts[levelIndex + 1];
+			if (
+				!level ||
+				!Array.isArray(level.inputs) ||
+				!Array.isArray(level.outputs) ||
+				!Array.isArray(level.biases) ||
+				!Array.isArray(level.weights) ||
+				level.inputs.length !== inputCount ||
+				level.outputs.length !== outputCount ||
+				level.biases.length !== outputCount ||
+				level.weights.length !== inputCount
+			) {
+				return false;
+			}
+
+			if (!level.biases.every(Number.isFinite)) return false;
+			return level.weights.every(
+				(row) =>
+					Array.isArray(row) && row.length === outputCount && row.every(Number.isFinite)
+			);
+		});
+	}
+
 	static mutate(network, amount = 1) {
 		network.levels.forEach((level) => {
 			for (let i = 0; i < level.biases.length; i++) {
