@@ -124,6 +124,10 @@ export default class Main {
 	#trafficSeed = 0;
 	#animation = 0;
 	#running = false;
+	#playbackEnabled = true;
+	#stateKey = LAB_STATE_KEY;
+	#legacyBrainKey = 'bestBrain';
+	#resourcePreset = 'full';
 	#recoveries = 0;
 	#stableFrames = 0;
 	#lastSampleKey = '';
@@ -146,12 +150,15 @@ export default class Main {
 	};
 	#ui;
 
-	constructor({ ctx, width, height, netCtx, netWidth }) {
+	constructor({ ctx, width, height, netCtx, netWidth, stateKey = LAB_STATE_KEY, resourcePreset = 'full' }) {
 		this.#ctx = ctx;
 		this.#netCtx = netCtx;
 		this.#width = width;
 		this.#height = height;
 		this.#netWidth = netWidth;
+		this.#stateKey = stateKey;
+		this.#legacyBrainKey = stateKey === LAB_STATE_KEY ? 'bestBrain' : `${stateKey}:bestBrain`;
+		this.#resourcePreset = resourcePreset;
 		this.#ui = {
 			generation: document.getElementById('generation-value'),
 			active: document.getElementById('active-value'),
@@ -203,6 +210,7 @@ export default class Main {
 				},
 			},
 		};
+		this.#applyResourcePreset(resourcePreset);
 	}
 
 	#generateCars() {
@@ -591,7 +599,7 @@ export default class Main {
 	#loadLabState() {
 		let parsed = null;
 		try {
-			parsed = JSON.parse(localStorage.getItem(LAB_STATE_KEY) || 'null');
+			parsed = JSON.parse(localStorage.getItem(this.#stateKey) || 'null');
 		} catch (error) {
 			console.warn('Training state could not be parsed.', error);
 		}
@@ -657,9 +665,9 @@ export default class Main {
 					manualDifficultyIndex: this.#manualDifficultyIndex,
 				},
 			};
-			localStorage.setItem(LAB_STATE_KEY, JSON.stringify(state));
-			if (state.champion) localStorage.setItem('bestBrain', JSON.stringify(state.champion));
-			else localStorage.removeItem('bestBrain');
+			localStorage.setItem(this.#stateKey, JSON.stringify(state));
+			if (state.champion) localStorage.setItem(this.#legacyBrainKey, JSON.stringify(state.champion));
+			else localStorage.removeItem(this.#legacyBrainKey);
 			return true;
 		} catch (error) {
 			console.warn('Training state could not be persisted.', error);
@@ -757,9 +765,6 @@ export default class Main {
 
 		this.#bestCar = this.#cars[0];
 		document.body.dataset.sensorCount = String(this.#activeSensors.length);
-		if (document.body.dataset.view === 'network') {
-			document.getElementById('view-legend-secondary').textContent = `${this.#activeSensors.length} INPUTS → 6 HIDDEN → 4 OUTPUTS`;
-		}
 		this.#bestCar.sensor?.update(
 			this.#street.bordersNear(this.#bestCar.y, this.#maxSensorReach + 100),
 			this.#nearbyTrafficFor(this.#bestCar)
@@ -772,7 +777,7 @@ export default class Main {
 	}
 
 	#loadSavedBrain() {
-		const saved = localStorage.getItem('bestBrain');
+		const saved = localStorage.getItem(this.#legacyBrainKey);
 		if (!saved) return { brain: null, status: null };
 		try {
 			const brain = JSON.parse(saved);
@@ -780,7 +785,7 @@ export default class Main {
 		} catch (error) {
 			console.warn('Saved champion could not be parsed.', error);
 		}
-		localStorage.removeItem('bestBrain');
+		localStorage.removeItem(this.#legacyBrainKey);
 		return { brain: null, status: 'STALE CHAMPION CLEARED · RANDOM RESTART' };
 	}
 
@@ -806,7 +811,7 @@ export default class Main {
 			? `RESTORED ${saved.completedRunCount} RUNS · CONTINUING AT GEN ${saved.generationCount + 1}${restoredInterruptedRun ? ' · LAST TRACE SAVED' : ''}`
 			: saved.status;
 		this.#startGeneration({ keepElite: false, status: memoryStatus });
-		if (!this.#running) {
+		if (!this.#running && this.#playbackEnabled) {
 			this.#running = true;
 			this.#animation = window.requestAnimationFrame(this.#animate);
 		}
@@ -987,7 +992,49 @@ export default class Main {
 		this.#renderGarage();
 	}
 
+	#resolvedResourcePreset(requested) {
+		if (requested !== 'reader') return ['conserve', 'balanced', 'full'].includes(requested) ? requested : 'full';
+		const reducedMotion = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+		const saveData = navigator.connection?.saveData;
+		const limitedMemory = Number(navigator.deviceMemory) > 0 && Number(navigator.deviceMemory) <= 4;
+		const limitedCores = Number(navigator.hardwareConcurrency) > 0 && Number(navigator.hardwareConcurrency) <= 4;
+		return reducedMotion || saveData || limitedMemory || limitedCores ? 'conserve' : 'balanced';
+	}
+
+	#applyResourcePreset(requested, { restart = false } = {}) {
+		const profiles = {
+			conserve: { speed: 1, duration: 'short', population: 36, traffic: 'sparse', autoEvolve: true },
+			balanced: { speed: 1, duration: 'smart', population: 60, traffic: 'standard', autoEvolve: true },
+			full: { speed: 2, duration: 'smart', population: 120, traffic: 'standard', autoEvolve: true },
+		};
+		this.#resourcePreset = ['reader', 'conserve', 'balanced', 'full'].includes(requested) ? requested : 'full';
+		const resolved = this.#resolvedResourcePreset(this.#resourcePreset);
+		const profile = profiles[resolved];
+		Object.assign(this.#settings, profile);
+
+		const preset = document.getElementById('resource-preset');
+		const speed = document.getElementById('sim-speed');
+		const duration = document.getElementById('episode-duration');
+		const traffic = document.getElementById('traffic-density');
+		const population = document.getElementById('population-size');
+		const auto = document.getElementById('auto-evolve');
+		if (preset) preset.value = this.#resourcePreset;
+		if (speed) speed.value = String(profile.speed);
+		if (duration) duration.value = profile.duration;
+		if (traffic) traffic.value = profile.traffic;
+		if (population) population.value = String(profile.population);
+		if (auto) auto.checked = profile.autoEvolve;
+		document.body.dataset.resourceProfile = resolved;
+
+		if (restart && this.#bestCar) {
+			this.#archiveInterruptedRun(this.#activeRunState());
+			this.#runFinalized = true;
+			this.#startGeneration({ keepElite: true, status: `${resolved.toUpperCase()} PRESET · NEW RUN` });
+		}
+	}
+
 	#bindControls() {
+		const resourcePreset = document.getElementById('resource-preset');
 		const speed = document.getElementById('sim-speed');
 		const duration = document.getElementById('episode-duration');
 		const mutation = document.getElementById('mutation-rate');
@@ -1010,6 +1057,7 @@ export default class Main {
 		this.#settings.population = Number(population.value);
 		this.#settings.autoEvolve = autoEvolve.checked;
 
+		resourcePreset.onchange = () => this.#applyResourcePreset(resourcePreset.value, { restart: true });
 		speed.onchange = () => (this.#settings.speed = Number(speed.value));
 		duration.onchange = () => {
 			this.#settings.duration = duration.value;
@@ -1262,6 +1310,20 @@ export default class Main {
 
 	checkpoint = () => this.#persistLabState();
 
+	setPlaying(playing) {
+		this.#playbackEnabled = Boolean(playing);
+		if (!this.#playbackEnabled) {
+			this.#persistLabState();
+			this.#running = false;
+			window.cancelAnimationFrame(this.#animation);
+			return;
+		}
+		if (!this.#running) {
+			this.#running = true;
+			this.#animation = window.requestAnimationFrame(this.#animate);
+		}
+	}
+
 	resize({ width, height, netWidth }) {
 		const horizontalShift = width / 2 - this.#width / 2;
 		if (Number.isFinite(horizontalShift) && horizontalShift !== 0) {
@@ -1275,7 +1337,6 @@ export default class Main {
 	}
 
 	stop() {
-		this.#running = false;
-		window.cancelAnimationFrame(this.#animation);
+		this.setPlaying(false);
 	}
 }

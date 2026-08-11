@@ -25,6 +25,10 @@
 
 			<section id="inspection-panel" class="inspection" aria-label="Neural network and fitness inspection">
 				<canvas id="network" aria-label="Neural network activity for the current champion"></canvas>
+				<section id="drive-config" class="drive-config" aria-label="Driving configuration">
+					<header><strong>RUN CONFIGURATION</strong><span>THE ROAD STAYS FULL-SIZE WHILE THE POLICY CONTROLS MOVE HERE</span></header>
+					<div id="drive-controls-slot"></div>
+				</section>
 
 				<section id="fitness-dashboard" class="fitness-dashboard" aria-label="Live evolutionary fitness dashboard">
 					<header class="training-head">
@@ -124,7 +128,6 @@
 					</div>
 				</section>
 
-				<div class="legend"><span id="view-legend-primary">ROAD + FIVE RAYS</span><span id="view-legend-secondary">5 → 6 → 4 NETWORK</span></div>
 			</section>
 		</main>
 
@@ -139,8 +142,18 @@
 				<meter id="generation-progress" min="0" max="1" value="0" aria-label="Generation progress"></meter>
 			</div>
 
+			<span id="tuning-home-anchor" hidden></span>
 			<div class="tuning">
-				<label>
+				<label data-control="profile">
+					<span>RESOURCE PRESET</span>
+					<select id="resource-preset">
+						<option value="reader">AUTO / READER</option>
+						<option value="conserve">CONSERVE</option>
+						<option value="balanced">BALANCED</option>
+						<option value="full" selected>FULL LAB</option>
+					</select>
+				</label>
+				<label data-control="speed">
 					<span>SIM SPEED</span>
 					<select id="sim-speed">
 						<option value="1">1×</option>
@@ -148,7 +161,7 @@
 						<option value="4">4×</option>
 					</select>
 				</label>
-				<label>
+				<label data-control="duration">
 					<span>RUN WINDOW</span>
 					<select id="episode-duration" title="Smart starts at 25 seconds and can extend to 60 when pace, passing, and lane-change quality remain high">
 						<option value="smart" selected>SMART</option>
@@ -157,19 +170,19 @@
 						<option value="long">45 S</option>
 					</select>
 				</label>
-				<label>
+				<label data-control="mutation">
 					<span>MUTATION <output id="mutation-output">12%</output></span>
 					<input id="mutation-rate" type="range" min="0.03" max="0.3" step="0.01" value="0.12" />
 				</label>
-				<label>
+				<label data-control="pace">
 					<span>PACE TARGET <output id="pace-output">3.2</output></span>
 					<input id="pace-target" type="range" min="2.5" max="4" step="0.1" value="3.2" />
 				</label>
-				<label>
+				<label data-control="acceleration">
 					<span>ACCEL <output id="acceleration-output">1.6×</output></span>
 					<input id="acceleration-factor" type="range" min="1" max="2.5" step="0.1" value="1.6" />
 				</label>
-				<label>
+				<label data-control="traffic">
 					<span>TRAFFIC</span>
 					<select id="traffic-density">
 						<option value="sparse">SPARSE</option>
@@ -177,31 +190,32 @@
 						<option value="dense">DENSE</option>
 					</select>
 				</label>
-				<label>
+				<label data-control="population">
 					<span>POPULATION</span>
 					<select id="population-size">
+						<option value="36">36</option>
 						<option value="60">60</option>
 						<option value="120" selected>120</option>
 						<option value="200">200</option>
 					</select>
 				</label>
-				<label class="toggle" title="Advance automatically when the run window ends">
+				<label class="toggle" data-control="auto" title="Advance automatically when the run window ends">
 					<input id="auto-evolve" type="checkbox" checked />
 					<span>AUTO</span>
 				</label>
 			</div>
 
 			<div class="actions">
-				<label class="promotion-policy">
+				<label class="promotion-policy" data-action="promotion">
 					<span>PROMOTION POLICY</span>
 					<select id="promotion-mode">
 						<option value="smart" selected>SMART / CONSISTENT</option>
 						<option value="manual">MANUAL / HOLD</option>
 					</select>
 				</label>
-				<button id="promote-difficulty" type="button" disabled title="Switch to Manual to choose when the course advances">SMART PROMOTION</button>
-				<button id="next-generation" title="Score this run and mutate its champion">NEXT GENERATION ↗</button>
-				<button id="reset-run" title="Restart from the saved champion, or from random networks">RESET RUN</button>
+				<button id="promote-difficulty" data-action="promote" type="button" disabled title="Switch to Manual to choose when the course advances">SMART PROMOTION</button>
+				<button id="next-generation" data-action="next" title="Score this run and mutate its champion">NEXT GENERATION ↗</button>
+				<button id="reset-run" data-action="reset" title="Restart from the saved champion, or from random networks">RESET RUN</button>
 			</div>
 		</footer>
 
