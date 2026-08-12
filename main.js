@@ -843,11 +843,11 @@ export default class Main {
 		const next = DIFFICULTIES[currentIndex + 1] ?? null;
 		promote.disabled = this.#settings.promotionMode !== 'manual' || !next;
 		promote.textContent = this.#settings.promotionMode === 'smart'
-			? next ? `SMART · ${this.#smartPromotionProgress()}/2 RUNS` : 'MAX TIER'
-			: next ? `PROMOTE TO ${next.unlockLabel} ↑` : 'MAX TIER';
+			? next ? `${window.pnT?.('SMART') ?? 'SMART'} · ${this.#smartPromotionProgress()}/2 ${window.pnT?.('RUNS') ?? 'RUNS'}` : (window.pnT?.('MAX TIER') ?? 'MAX TIER')
+			: next ? `${window.pnT?.('PROMOTE TO') ?? 'PROMOTE TO'} ${window.pnT?.(next.unlockLabel) ?? next.unlockLabel} ↑` : (window.pnT?.('MAX TIER') ?? 'MAX TIER');
 		promote.title = this.#settings.promotionMode === 'smart'
-			? 'Smart promotion requires two consecutive runs above the next fitness milestone'
-			: next ? `Complete this run and start ${next.label}` : 'The course is already at its highest tier';
+			? (window.pnT?.('Smart promotion requires two consecutive runs above the next fitness milestone') ?? 'Smart promotion requires two consecutive runs above the next fitness milestone')
+			: next ? `${window.pnT?.('NEXT GENERATION ↗') ?? 'NEXT GENERATION'}: ${window.pnT?.(next.label) ?? next.label}` : (window.pnT?.('The course is already at its highest tier') ?? 'The course is already at its highest tier');
 	}
 
 	#promoteDifficulty = () => {
@@ -933,7 +933,7 @@ export default class Main {
 			const remove = document.createElement('button');
 			remove.type = 'button';
 			remove.textContent = '×';
-			remove.title = 'Delete this sensor';
+			remove.title = window.pnT?.('Delete this sensor') ?? 'Delete this sensor';
 			remove.disabled = this.#pendingSensors.length <= 1;
 			remove.onclick = () => this.#stageSensorChange((sensors) => sensors.splice(index, 1));
 			row.append(name, createRange('angle', -80, 80, 1, '°'), createRange('length', 80, 360, 10, ''), remove);
@@ -1203,15 +1203,17 @@ export default class Main {
 		dashboard.pace.textContent = `${breakdown.averageSpeed.toFixed(1)} / ${this.#settings.pace.toFixed(1)}`;
 		dashboard.passes.textContent = String(snapshot.passes);
 		dashboard.window.textContent = `${Math.round(this.#generationLimit / TICKS_PER_SECOND)} S${this.#smartExtensions ? ` · +${this.#smartExtensions}` : ''}`;
-		dashboard.memory.textContent = `${this.#completedRunCount} SAVED`;
+		dashboard.memory.textContent = `${this.#completedRunCount} ${window.pnT?.('SAVED') ?? 'SAVED'}`;
 		dashboard.difficulty.textContent = window.pnT?.(this.#difficulty.label) ?? this.#difficulty.label;
-		dashboard.promotion.textContent = this.#settings.promotionMode === 'smart' ? 'SMART / 2 RUNS' : 'MANUAL / USER';
+		dashboard.promotion.textContent = this.#settings.promotionMode === 'smart'
+			? `${window.pnT?.('SMART') ?? 'SMART'} / 2 ${window.pnT?.('RUNS') ?? 'RUNS'}`
+			: (window.pnT?.('MANUAL / USER') ?? 'MANUAL / USER');
 		const nextDifficulty = this.#nextDifficulty();
 		dashboard.nextUnlock.textContent = nextDifficulty
 			? `${nextDifficulty.unlockLabel} · ${this.#settings.promotionMode === 'smart'
 				? `${nextDifficulty.milestone >= 10000 ? `${Math.round(nextDifficulty.milestone / 1000)}K` : `${(nextDifficulty.milestone / 1000).toFixed(1)}K`} · ${this.#smartPromotionProgress()}/2`
-				: 'READY'}`
-			: 'MAX TIER';
+				: (window.pnT?.('READY') ?? 'READY')}`
+			: (window.pnT?.('MAX TIER') ?? 'MAX TIER');
 		dashboard.seed.textContent = this.#trafficSeed.toString(16).toUpperCase().padStart(8, '0').slice(-8);
 		dashboard.progressReward.textContent = signed(breakdown.progress);
 		dashboard.paceReward.textContent = signed(breakdown.pace);
