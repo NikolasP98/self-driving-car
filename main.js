@@ -500,7 +500,7 @@ export default class Main {
 		if (!this.#shouldExtendSmartRun()) return false;
 		this.#generationLimit = Math.min(SMART_MAX_TICKS, this.#generationLimit + SMART_EXTENSION_TICKS);
 		this.#smartExtensions += 1;
-		this.#ui.status.textContent = `SMART WINDOW EXTENDED · ${Math.round(this.#generationLimit / TICKS_PER_SECOND)}S`;
+		this.#ui.status.textContent = `${window.pnT?.('SMART WINDOW EXTENDED') ?? 'SMART WINDOW EXTENDED'} · ${Math.round(this.#generationLimit / TICKS_PER_SECOND)}S`;
 		return true;
 	}
 
@@ -671,7 +671,7 @@ export default class Main {
 			return true;
 		} catch (error) {
 			console.warn('Training state could not be persisted.', error);
-			this.#ui.status.textContent = 'LOCAL SAVE FULL · RUN CONTINUES';
+			this.#ui.status.textContent = window.pnT?.('LOCAL SAVE FULL · RUN CONTINUES') ?? 'LOCAL SAVE FULL · RUN CONTINUES';
 			return false;
 		}
 	}
@@ -769,7 +769,7 @@ export default class Main {
 			this.#street.bordersNear(this.#bestCar.y, this.#maxSensorReach + 100),
 			this.#nearbyTrafficFor(this.#bestCar)
 		);
-		this.#ui.status.textContent = status ?? (this.#championBrain ? `EVOLVING SAVED CHAMPION · ${this.#difficulty.label}` : 'SEARCHING FROM RANDOM');
+		this.#ui.status.textContent = status ?? (this.#championBrain ? `${window.pnT?.('EVOLVING SAVED CHAMPION') ?? 'EVOLVING SAVED CHAMPION'} · ${window.pnT?.(this.#difficulty.label) ?? this.#difficulty.label}` : (window.pnT?.('SEARCHING FROM RANDOM') ?? 'SEARCHING FROM RANDOM'));
 		this.#renderGarage();
 		this.#syncPromotionControls();
 		this.#lastCheckpointAt = Date.now();
@@ -871,14 +871,14 @@ export default class Main {
 				this.#settings.rewards[key] = Number.isFinite(value) && value >= 0 ? value : REWARD_DEFAULTS[key];
 				input.value = String(this.#settings.rewards[key]);
 				this.#persistLabState();
-				this.#ui.status.textContent = 'FITNESS WEIGHTS UPDATED';
+				this.#ui.status.textContent = window.pnT?.('FITNESS WEIGHTS UPDATED') ?? 'FITNESS WEIGHTS UPDATED';
 			});
 		}
 		document.getElementById('reset-rewards').onclick = () => {
 			this.#settings.rewards = { ...REWARD_DEFAULTS };
 			this.#syncRewardInputs();
 			this.#persistLabState();
-			this.#ui.status.textContent = 'FITNESS WEIGHTS RESET';
+			this.#ui.status.textContent = window.pnT?.('FITNESS WEIGHTS RESET') ?? 'FITNESS WEIGHTS RESET';
 		};
 	}
 
@@ -888,7 +888,7 @@ export default class Main {
 		this.#pendingSensors = this.#safeSensors(next);
 		this.#persistLabState();
 		this.#renderGarage();
-		this.#ui.status.textContent = 'SENSOR EDITS QUEUED · NEXT GENERATION';
+		this.#ui.status.textContent = window.pnT?.('SENSOR EDITS QUEUED · NEXT GENERATION') ?? 'SENSOR EDITS QUEUED · NEXT GENERATION';
 	}
 
 	#renderGarage() {
@@ -898,14 +898,14 @@ export default class Main {
 		rows.replaceChildren();
 		rays.replaceChildren();
 		const changed = this.#sensorsChanged();
-		document.getElementById('garage-status').textContent = changed ? 'CHANGES PENDING · NEXT RUN' : 'CURRENT CONFIGURATION';
-		document.getElementById('sensor-count').textContent = `${this.#pendingSensors.length} INPUT NODE${this.#pendingSensors.length === 1 ? '' : 'S'}`;
+		document.getElementById('garage-status').textContent = window.pnT?.(changed ? 'CHANGES PENDING · NEXT RUN' : 'CURRENT CONFIGURATION') ?? (changed ? 'CHANGES PENDING · NEXT RUN' : 'CURRENT CONFIGURATION');
+		document.getElementById('sensor-count').textContent = `${this.#pendingSensors.length} ${window.pnT?.(this.#pendingSensors.length === 1 ? 'INPUT NODE' : 'INPUT NODES') ?? (this.#pendingSensors.length === 1 ? 'INPUT NODE' : 'INPUT NODES')}`;
 
 		this.#pendingSensors.forEach((sensor, index) => {
 			const row = document.createElement('div');
 			row.className = 'sensor-row';
 			const name = document.createElement('strong');
-			name.textContent = `R${String(index + 1).padStart(2, '0')} · ${sensor.id.startsWith('ray-new') ? 'NEWBORN' : 'WEIGHTED'}`;
+			name.textContent = `R${String(index + 1).padStart(2, '0')} · ${window.pnT?.(sensor.id.startsWith('ray-new') ? 'NEWBORN' : 'WEIGHTED') ?? (sensor.id.startsWith('ray-new') ? 'NEWBORN' : 'WEIGHTED')}`;
 
 			const createRange = (property, min, max, step, suffix) => {
 				const label = document.createElement('label');
@@ -974,7 +974,7 @@ export default class Main {
 	#bindGarage() {
 		document.getElementById('add-sensor').onclick = () => {
 			if (this.#pendingSensors.length >= 12) {
-				this.#ui.status.textContent = 'SENSOR LIMIT · 12 INPUTS';
+					this.#ui.status.textContent = window.pnT?.('SENSOR LIMIT · 12 INPUTS') ?? 'SENSOR LIMIT · 12 INPUTS';
 				return;
 			}
 			this.#stageSensorChange((sensors) => sensors.push({
@@ -987,7 +987,7 @@ export default class Main {
 			this.#pendingSensors = cloneSensors(DEFAULT_SENSOR_CONFIG);
 			this.#persistLabState();
 			this.#renderGarage();
-			this.#ui.status.textContent = 'FIVE-RAY ARRAY QUEUED · NEXT GENERATION';
+			this.#ui.status.textContent = window.pnT?.('FIVE-RAY ARRAY QUEUED · NEXT GENERATION') ?? 'FIVE-RAY ARRAY QUEUED · NEXT GENERATION';
 		};
 		this.#renderGarage();
 	}
@@ -1204,7 +1204,7 @@ export default class Main {
 		dashboard.passes.textContent = String(snapshot.passes);
 		dashboard.window.textContent = `${Math.round(this.#generationLimit / TICKS_PER_SECOND)} S${this.#smartExtensions ? ` · +${this.#smartExtensions}` : ''}`;
 		dashboard.memory.textContent = `${this.#completedRunCount} SAVED`;
-		dashboard.difficulty.textContent = this.#difficulty.label;
+		dashboard.difficulty.textContent = window.pnT?.(this.#difficulty.label) ?? this.#difficulty.label;
 		dashboard.promotion.textContent = this.#settings.promotionMode === 'smart' ? 'SMART / 2 RUNS' : 'MANUAL / USER';
 		const nextDifficulty = this.#nextDifficulty();
 		dashboard.nextUnlock.textContent = nextDifficulty
@@ -1274,7 +1274,7 @@ export default class Main {
 
 		if (this.#recoveries > 2) {
 			this.#running = false;
-			this.#ui.status.textContent = 'PAUSED AFTER REPEATED ERROR · RESET RUN';
+			this.#ui.status.textContent = window.pnT?.('PAUSED AFTER REPEATED ERROR · RESET RUN') ?? 'PAUSED AFTER REPEATED ERROR · RESET RUN';
 			return;
 		}
 
