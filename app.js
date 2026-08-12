@@ -3,7 +3,7 @@ import Main from './main.js';
 let mainEvent;
 
 const ES = {
-	'SOURCE LAB': 'LABORATORIO', 'FIVE RAYS INTO FOUR DECISIONS': 'CINCO RAYOS EN CUATRO DECISIONES',
+	'SOURCE LAB': 'LABORATORIO', 'PINONITE / SOURCE LAB': 'PINONITE / LABORATORIO', 'FIVE RAYS INTO FOUR DECISIONS': 'CINCO RAYOS EN CUATRO DECISIONES',
 	'DRIVE': 'CONDUCCIÓN', 'NETWORK': 'RED', 'FITNESS': 'APTITUD', 'GARAGE': 'GARAJE',
 	'EVOLUTIONARY DRIVING · LIVE': 'CONDUCCIÓN EVOLUTIVA · EN VIVO', 'Simulation view': 'Vista de simulación',
 	'Road simulation with neural cars and traffic': 'Simulación vial con autos neuronales y tráfico',
@@ -28,6 +28,7 @@ let locale = 'en';
 window.pnT = (text) => locale === 'es' ? (ES[text] || text) : text;
 const localizeDocument = () => {
 	document.documentElement.lang = locale;
+	document.title = locale === 'es' ? 'Cinco rayos en cuatro decisiones · Laboratorio Pinonite' : 'Five Rays Into Four Decisions · Pinonite Source Lab';
 	document.querySelectorAll('body *').forEach((element) => {
 		for (const node of element.childNodes) {
 			if (node.nodeType !== Node.TEXT_NODE || !node.textContent.trim()) continue;
